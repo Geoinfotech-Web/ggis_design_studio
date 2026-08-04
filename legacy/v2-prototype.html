@@ -1,0 +1,1023 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>GIS Design Studio — Template-Based Map Creation</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;500;600;700&family=Fraunces:wght@500;600&display=swap" rel="stylesheet" />
+
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+<style>
+  :root{ --gds-ink:#0f172a; --gds-river:#0369a1; --gds-mist:#e0f2fe; }
+  html,body,#root{height:100%;margin:0;}
+  body{font-family:'Source Sans 3', ui-sans-serif, system-ui, sans-serif; background:#f8fafc; color:var(--gds-ink);}
+  .font-display{font-family:'Fraunces', Georgia, serif;}
+
+  ::-webkit-scrollbar{width:5px;height:5px;}
+  ::-webkit-scrollbar-track{background:transparent;}
+  ::-webkit-scrollbar-thumb{background:#94a3b8;border-radius:4px;}
+  ::-webkit-scrollbar-thumb:hover{background:#64748b;}
+
+  .maplibregl-ctrl-group{border-radius:10px !important;overflow:hidden;box-shadow:0 4px 12px rgba(15,23,42,.12) !important;}
+  .maplibregl-ctrl-attrib{font-size:10px !important;}
+
+  .gds-card{ background:#ffffff; border:1px solid #e2e8f0; border-radius:14px; box-shadow:0 1px 2px rgba(15,23,42,.04); }
+  .gds-template-card{ transition:border-color .15s ease, box-shadow .15s ease, background .15s ease; cursor:pointer; }
+  .gds-template-card:hover{ border-color:#7dd3fc; background:#f0f9ff; }
+  .gds-template-card.is-active{ border-color:#0369a1; background:#e0f2fe; box-shadow:0 4px 14px rgba(3,105,161,.15); }
+  .gds-swatch{width:10px;height:10px;border-radius:3px;flex:none;}
+  .gds-toggle{ display:inline-flex;align-items:center;gap:.4rem; padding:.35rem .5rem;border-radius:.5rem; font-size:.72rem;font-weight:600;color:#475569; border:1px solid transparent; }
+  .gds-panel-title{ font-size:.68rem;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#64748b; }
+  .gds-input{ width:100%; border:1px solid #e2e8f0; border-radius:.5rem; padding:.4rem .6rem; font-size:.75rem; color:#0f172a; background:#f8fafc; }
+  .gds-input:focus{ outline:2px solid #7dd3fc; outline-offset:0; background:#fff; }
+  .gds-btn-primary{ background:#0369a1; color:#fff; border-radius:.5rem; font-weight:600; font-size:.72rem; padding:.45rem .6rem; }
+  .gds-btn-primary:hover{ background:#075985; }
+  .gds-btn-ghost{ border:1px solid #cbd5e1; color:#475569; border-radius:.5rem; font-weight:600; font-size:.72rem; padding:.45rem .6rem; }
+  .gds-btn-ghost:hover{ border-color:#94a3b8; }
+
+  #map{position:absolute;inset:0;}
+  .gds-map-overlay-card{ background:rgba(255,255,255,.95); backdrop-filter:blur(6px); border:1px solid #e2e8f0; border-radius:12px; box-shadow:0 8px 24px rgba(15,23,42,.14); }
+
+  /* Artboard: represents the printable page. Elements inside are draggable. */
+  #artboard{ position:absolute; box-sizing:border-box; }
+  .gds-draggable{ position:absolute; touch-action:none; user-select:none; cursor:grab; }
+  .gds-draggable:active{ cursor:grabbing; }
+  .gds-drag-hint{ position:absolute; top:-3px; right:-3px; width:16px;height:16px;border-radius:999px; background:#0369a1; color:#fff; font-size:9px; display:flex;align-items:center;justify-content:center; opacity:0; transition:opacity .15s; }
+  .gds-draggable:hover .gds-drag-hint{ opacity:1; }
+
+  /* Canva-inspired home, tailored to map design. */
+  #landing{position:fixed;inset:0;z-index:100;background:#fbfbfd;display:flex;color:#171321;overflow:hidden;}
+  #landing.is-hidden{display:none;}
+  .home-rail{width:92px;flex:none;border-right:1px solid #ece9f2;background:#fff;padding:14px 10px;display:flex;flex-direction:column;align-items:center;gap:9px;}
+  .home-brand{width:44px;height:44px;border-radius:14px;border:1px solid #bae6fd;background:#f0f9ff;display:grid;place-items:center;color:#0369a1;box-shadow:0 8px 20px rgba(3,105,161,.1);}
+  .rail-item{width:70px;border:0;background:transparent;border-radius:14px;padding:9px 4px;color:#6d6480;font-size:11px;font-weight:600;display:grid;justify-items:center;gap:4px;cursor:pointer;}
+  .rail-item:hover,.rail-item.is-active{background:#e0f2fe;color:#0369a1;}
+  .rail-icon{width:28px;height:28px;border-radius:9px;display:grid;place-items:center;font-size:17px;}
+  .home-main{min-width:0;flex:1;overflow-y:auto;padding:8px 14px 42px;}
+  .home-hero{min-height:316px;border-radius:22px;padding:48px 44px 34px;background:radial-gradient(circle at 8% 0%,rgba(125,211,252,.6),transparent 35%),radial-gradient(circle at 96% 0%,rgba(94,234,212,.38),transparent 38%),linear-gradient(135deg,#effaff 0%,#f8fafc 52%,#ecfdf5 100%);text-align:center;border:1px solid #e0f2fe;}
+  .home-hero h1{margin:0;font-size:clamp(34px,4vw,56px);line-height:1.05;font-family:'Fraunces',Georgia,serif;font-weight:600;letter-spacing:-.035em;background:linear-gradient(90deg,#075985,#0284c7 55%,#0f766e);-webkit-background-clip:text;color:transparent;}
+  .home-hero p{margin:12px auto 0;max-width:620px;color:#625a72;font-size:16px;}
+  .home-search{height:62px;max-width:860px;margin:30px auto 0;border:1px solid #bae6fd;border-radius:18px;background:#fff;box-shadow:0 8px 25px rgba(3,105,161,.09);display:flex;align-items:center;gap:13px;padding:0 20px;text-align:left;}
+  .home-search input{border:0;outline:0;min-width:0;flex:1;font:inherit;font-size:16px;color:#201a2c;}
+  .home-search button{border:0;border-radius:11px;background:#0369a1;color:#fff;padding:10px 16px;font-weight:700;cursor:pointer;}
+  .quick-row{max-width:1000px;margin:31px auto 0;display:grid;grid-template-columns:repeat(6,1fr);gap:18px;}
+  .quick-action{border:0;background:transparent;cursor:pointer;color:#50495c;font-weight:600;font-size:12px;display:grid;justify-items:center;gap:9px;}
+  .quick-bubble{width:58px;height:58px;border-radius:20px;display:grid;place-items:center;color:#fff;font-size:25px;box-shadow:inset 0 -4px 10px rgba(0,0,0,.07);transition:transform .2s;}
+  .quick-action:hover .quick-bubble{transform:translateY(-4px);}
+  .home-section{max-width:1260px;margin:34px auto 0;}
+  .section-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;}
+  .section-head h2{font-size:25px;letter-spacing:-.025em;margin:0;}
+  .section-head button{border:0;background:transparent;color:#0369a1;font-weight:700;cursor:pointer;}
+  .create-modal{position:fixed;inset:0;z-index:150;background:rgba(15,23,42,.55);backdrop-filter:blur(5px);display:none;padding:40px;}
+  .create-modal.is-open{display:grid;place-items:center;}
+  .create-dialog{width:min(1080px,100%);max-height:86vh;overflow:auto;border-radius:25px;background:#fff;box-shadow:0 30px 90px rgba(15,23,42,.24);padding:30px;position:relative;}
+  .create-dialog h2{font-family:'Fraunces',Georgia,serif;font-size:32px;margin:0;color:#0f172a;}
+  .create-close{position:absolute;right:22px;top:22px;width:38px;height:38px;border-radius:50%;border:1px solid #cbd5e1;background:#fff;font-size:22px;cursor:pointer;}
+  .create-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:15px;margin-top:24px;}
+  .create-choice{border:1px solid #e2e8f0;border-radius:16px;background:#f8fafc;padding:18px;text-align:left;cursor:pointer;display:flex;gap:13px;align-items:center;}
+  .create-choice:hover{border-color:#38bdf8;background:#f0f9ff;}
+  .create-choice span{width:45px;height:45px;border-radius:13px;background:#e0f2fe;color:#0369a1;display:grid;place-items:center;font-size:22px;flex:none;}
+  .create-choice strong{display:block;color:#0f172a}.create-choice small{display:block;color:#64748b;margin-top:3px;line-height:1.3;}
+  .project-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:20px;}
+  .project-card{border:0;background:transparent;text-align:left;cursor:pointer;min-width:0;}
+  .project-thumb{height:155px;border-radius:18px;overflow:hidden;position:relative;background:#e9edf2;box-shadow:0 1px 0 rgba(17,24,39,.05);transition:transform .2s,box-shadow .2s;}
+  .project-card:hover .project-thumb{transform:translateY(-4px);box-shadow:0 14px 30px rgba(30,41,59,.13);}
+  .mini-map{position:absolute;inset:13px;background-color:#eef5e9;background-image:linear-gradient(28deg,transparent 47%,rgba(255,255,255,.9) 48% 52%,transparent 53%),linear-gradient(104deg,transparent 46%,rgba(68,145,205,.55) 47% 51%,transparent 52%),repeating-linear-gradient(0deg,rgba(43,74,52,.07) 0 1px,transparent 1px 17px),repeating-linear-gradient(90deg,rgba(43,74,52,.06) 0 1px,transparent 1px 20px);border:7px solid #fff;box-shadow:0 2px 8px rgba(15,23,42,.14);}
+  .mini-map:after{content:'';position:absolute;width:18px;height:18px;border-radius:50% 50% 50% 0;background:#e83e52;left:56%;top:36%;transform:rotate(-45deg);box-shadow:0 2px 4px #fff;}
+  .project-card h3{margin:11px 0 2px;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .project-card p{margin:0;color:#837b90;font-size:12px;}
+  .template-showcase{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px;}
+  .template-filters{display:flex;gap:8px;flex-wrap:wrap;margin:17px 0;}
+  .template-filter{border:1px solid #cbd5e1;background:#fff;color:#475569;border-radius:999px;padding:7px 13px;font-size:12px;font-weight:700;cursor:pointer;}
+  .template-filter:hover,.template-filter.is-active{border-color:#0369a1;background:#e0f2fe;color:#0369a1;}
+  .style-card.is-filtered{display:none;}
+  .style-card{border:1px solid #e2e8f0;background:#fff;border-radius:18px;padding:10px;text-align:left;cursor:pointer;transition:transform .2s,box-shadow .2s,border-color .2s;}
+  .style-card:hover{transform:translateY(-4px);border-color:#7dd3fc;box-shadow:0 15px 34px rgba(15,23,42,.11);}
+  .style-preview{height:170px;border-radius:13px;overflow:hidden;position:relative;background:#e2e8f0;isolation:isolate;}
+  .style-preview:after{content:'';position:absolute;inset:0;pointer-events:none;}
+  .style-card h3{margin:11px 4px 3px;font-size:16px;color:#0f172a;}.style-card p{margin:0 4px 5px;color:#64748b;font-size:12px;line-height:1.35;}
+  .style-label{position:absolute;z-index:5;left:12px;top:12px;border-radius:999px;padding:5px 9px;background:rgba(255,255,255,.9);color:#0f172a;font-size:10px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;}
+  .layout-overlay{position:absolute;z-index:4;inset:9px;border:1px solid rgba(15,23,42,.72);box-shadow:inset 0 0 0 3px rgba(255,255,255,.52);pointer-events:none;}
+  .layout-overlay:before{content:attr(data-title);position:absolute;left:7px;right:7px;bottom:7px;padding:5px 7px;background:rgba(255,255,255,.9);border-top:2px solid #0f172a;color:#0f172a;font:700 9px 'Source Sans 3',sans-serif;letter-spacing:.04em;text-transform:uppercase;}
+  .layout-overlay:after{content:'N  ↑';position:absolute;right:8px;top:8px;width:29px;height:29px;border-radius:50%;display:grid;place-items:center;background:rgba(255,255,255,.9);color:#0f172a;font-size:9px;font-weight:800;}
+  .map-scale{position:absolute;z-index:5;right:19px;bottom:24px;width:48px;height:5px;border-left:1px solid #0f172a;border-right:1px solid #0f172a;border-bottom:2px solid #0f172a;}
+  .map-inset{position:absolute;z-index:5;right:19px;top:51px;width:48px;height:38px;border:2px solid rgba(255,255,255,.95);outline:1px solid #334155;background:radial-gradient(circle at 58% 50%,#ef4444 0 2px,transparent 3px),linear-gradient(145deg,#dbeafe,#bbf7d0);}
+  .map-grid{position:absolute;z-index:3;inset:10px;background:repeating-linear-gradient(0deg,transparent 0 29px,rgba(15,23,42,.17) 30px 31px),repeating-linear-gradient(90deg,transparent 0 39px,rgba(15,23,42,.17) 40px 41px);pointer-events:none;}
+  .map-coords{position:absolute;z-index:6;left:15px;bottom:26px;color:#0f172a;background:rgba(255,255,255,.78);padding:2px 4px;font-size:7px;font-weight:700;}
+  .preview-firefly{background:radial-gradient(circle at 58% 45%,#38bdf8 0 3px,transparent 4px),radial-gradient(circle at 35% 65%,#fbbf24 0 3px,transparent 4px),radial-gradient(circle at 72% 30%,#fb7185 0 4px,transparent 5px),linear-gradient(135deg,#061827,#172c38);}
+  .preview-firefly:after{background:radial-gradient(circle at 58% 45%,rgba(56,189,248,.7),transparent 9%),radial-gradient(circle at 35% 65%,rgba(251,191,36,.6),transparent 8%),radial-gradient(circle at 72% 30%,rgba(251,113,133,.7),transparent 9%),repeating-linear-gradient(28deg,transparent 0 34px,rgba(148,163,184,.12) 35px 36px);}
+  .preview-watercolor{background:linear-gradient(25deg,transparent 35%,rgba(2,132,199,.35) 36% 42%,transparent 43%),radial-gradient(ellipse at 25% 40%,rgba(74,222,128,.42),transparent 30%),radial-gradient(ellipse at 74% 65%,rgba(250,204,21,.34),transparent 28%),#f7f1df;}
+  .preview-watercolor:after{background:repeating-radial-gradient(circle at 20% 20%,rgba(71,85,105,.07) 0 1px,transparent 1px 4px);mix-blend-mode:multiply;}
+  .preview-muted{background:linear-gradient(102deg,transparent 48%,#7dd3fc 49% 53%,transparent 54%),repeating-linear-gradient(35deg,transparent 0 28px,rgba(71,85,105,.12) 29px 31px),#e8ece9;}
+  .preview-muted:after{inset:25% 20%;border:3px solid #0f766e;background:rgba(20,184,166,.16);box-shadow:0 0 0 999px rgba(255,255,255,.12);}
+  .preview-duotone{background:repeating-linear-gradient(12deg,#e7e1d3 0 15px,#d6cebc 16px 17px);}
+  .preview-duotone:after{inset:20% 14%;border:4px double #172554;background:repeating-linear-gradient(45deg,rgba(23,37,84,.13) 0 3px,transparent 3px 8px);}
+  .preview-terrain{background:radial-gradient(ellipse at 35% 50%,transparent 0 12%,#94a3b8 13% 14%,transparent 15% 23%,#64748b 24% 25%,transparent 26% 34%,#475569 35% 36%,transparent 37%),#d9e4d5;}
+  .preview-terrain:after{background:repeating-linear-gradient(115deg,transparent 0 14px,rgba(15,23,42,.14) 15px 16px);mix-blend-mode:multiply;}
+  .preview-texture{background:linear-gradient(90deg,#d1fae5 0 33%,#fef3c7 33% 66%,#dbeafe 66%);}
+  .preview-texture:after{background:repeating-linear-gradient(45deg,transparent 0 8px,rgba(15,118,110,.28) 8px 10px),repeating-linear-gradient(135deg,transparent 0 14px,rgba(3,105,161,.2) 14px 16px);}
+  .preview-vintage{background:radial-gradient(ellipse at 54% 48%,transparent 0 23%,#7c5f3b 24% 25%,transparent 26% 36%,#947451 37% 38%,transparent 39%),#e7d7b5;filter:sepia(.22);}
+  .preview-vintage:after{background:repeating-radial-gradient(circle at 20% 20%,rgba(78,52,29,.11) 0 1px,transparent 1px 4px);mix-blend-mode:multiply;}
+  .preview-3d{background:linear-gradient(145deg,transparent 0 42%,rgba(15,118,110,.35) 43% 48%,transparent 49%),radial-gradient(ellipse at 52% 95%,#14532d 0 8%,#4d7c0f 9% 19%,#84cc16 20% 31%,#bef264 32% 44%,#d9f99d 45% 55%,#e0f2fe 56%);}
+  .preview-3d:after{background:linear-gradient(160deg,rgba(255,255,255,.45),transparent 40%,rgba(15,23,42,.2));}
+  .preview-reference{background:linear-gradient(118deg,transparent 0 46%,rgba(56,189,248,.65) 47% 49%,transparent 50%),radial-gradient(circle at 64% 38%,#ef4444 0 2px,transparent 3px),repeating-linear-gradient(24deg,transparent 0 23px,rgba(190,24,93,.18) 24px 26px),#e8e4c8;}
+  .preview-reference:after{background:radial-gradient(ellipse at 70% 65%,rgba(22,163,74,.38),transparent 34%),repeating-linear-gradient(90deg,transparent 0 32px,rgba(51,65,85,.12) 33px 34px);}
+  .preview-editorial{background:#e8d7b8;}
+  .preview-editorial:before{content:'CLIMATE BRIEF';position:absolute;z-index:3;left:8px;right:8px;top:27px;border-top:3px double #292524;border-bottom:3px double #292524;padding:8px 0;color:#292524;text-align:center;font:900 16px Georgia,serif;letter-spacing:.08em;}
+  .preview-editorial:after{inset:78px 12px 12px 33%;border:1px solid #292524;background:radial-gradient(ellipse at 50% 50%,transparent 0 22%,#78716c 23% 24%,transparent 25%),repeating-linear-gradient(90deg,transparent 0 22px,rgba(41,37,36,.12) 23px 24px);}
+  .preview-elevation{background:radial-gradient(ellipse at 66% 52%,#f8fafc 0 6%,#7f1d1d 7% 16%,#ea580c 17% 23%,#facc15 24% 30%,#16a34a 31% 43%,#86efac 44% 55%,transparent 56%),#bce7ee;}
+  .preview-elevation:after{background:repeating-radial-gradient(ellipse at 66% 52%,transparent 0 10px,rgba(15,23,42,.15) 11px 12px);}
+  .preview-dashboard{background:#0b1b28;}
+  .preview-dashboard:before{content:'NATIONAL ENVIRONMENT PROFILE';position:absolute;z-index:3;left:13px;top:16px;color:#e2e8f0;font:800 11px 'Source Sans 3';letter-spacing:.08em;}
+  .preview-dashboard:after{left:12px;right:36%;top:45px;bottom:13px;border:1px solid #94a3b8;background:radial-gradient(ellipse at 46% 48%,#365314 0 34%,#1f3b14 35% 48%,transparent 49%);}
+  .preview-story{background:radial-gradient(ellipse at 58% 56%,#f5f5dc 0 10%,#a3b18a 11% 28%,#588157 29% 42%,#dad7cd 43% 55%,transparent 56%),#eee9d7;}
+  .preview-story:before{content:'';position:absolute;z-index:3;left:10px;top:36px;width:34%;height:108px;background:repeating-linear-gradient(0deg,#57534e 0 1px,transparent 1px 9px);opacity:.55;}
+  .preview-story:after{background:repeating-radial-gradient(ellipse at 58% 56%,transparent 0 13px,rgba(68,64,60,.25) 14px 15px);}
+  .preview-infographic{background:linear-gradient(90deg,#eef2f1 0 27%,transparent 27% 78%,#f8fafc 78%),radial-gradient(ellipse at 56% 53%,#14532d 0 24%,#0f766e 25% 38%,#cbd5e1 39% 49%,transparent 50%),#f8fafc;}
+  .preview-infographic:before{content:'';position:absolute;z-index:3;left:12px;top:38px;width:20%;height:92px;background:repeating-linear-gradient(0deg,#64748b 0 2px,transparent 2px 12px);opacity:.45;}
+  .preview-infographic:after{right:10px;left:auto;top:48px;width:15%;height:76px;background:linear-gradient(0deg,#0f766e 0 30%,transparent 30% 38%,#94a3b8 38% 62%,transparent 62% 70%,#d6b56b 70%);}
+  @media(max-width:900px){.home-rail{width:72px}.project-grid{grid-template-columns:repeat(2,1fr)}.quick-row{grid-template-columns:repeat(3,1fr)}.home-hero{padding:38px 18px}.home-main{padding-left:8px;padding-right:8px}.create-grid{grid-template-columns:1fr 1fr}.template-showcase{grid-template-columns:1fr 1fr}}
+  @media(max-width:520px){.home-rail{display:none}.home-hero{min-height:380px}.quick-row{gap:11px}.project-grid{grid-template-columns:1fr}.home-search button{display:none}}
+</style>
+</head>
+<body>
+<div id="create-modal" class="create-modal" role="dialog" aria-modal="true" aria-labelledby="create-title">
+  <div class="create-dialog">
+    <button id="create-close" class="create-close" aria-label="Close">×</button>
+    <h2 id="create-title">Create an environmental design</h2>
+    <p class="mt-2 text-slate-500">Choose an analysis-ready starting point. You can change layers, layout and page size in the studio.</p>
+    <div class="create-grid">
+      <button class="create-choice" data-template="site"><span>⌖</span><div><strong>Environmental Site Map</strong><small>Document a facility, sampling point or project location.</small></div></button>
+      <button class="create-choice" data-template="boundary"><span>⬡</span><div><strong>Study Boundary</strong><small>Map a country, state, watershed or local study extent.</small></div></button>
+      <button class="create-choice" data-template="landuse"><span>▦</span><div><strong>Land Use & Infrastructure</strong><small>Present roads, buildings, water and development context.</small></div></button>
+      <button class="create-choice" data-template="analysis"><span>◒</span><div><strong>Environmental Risk</strong><small>Visualize flood, erosion, pollution or exposure classes.</small></div></button>
+      <button class="create-choice" data-template="studyarea"><span>▤</span><div><strong>Study Area Report</strong><small>Combine a mapped boundary with area statistics.</small></div></button>
+      <button class="create-choice" data-enter-editor><span>＋</span><div><strong>Blank Map Design</strong><small>Start with the full studio and build your own layout.</small></div></button>
+    </div>
+  </div>
+</div>
+<div id="landing">
+  <nav class="home-rail" aria-label="Home navigation">
+    <div class="home-brand" title="GIS Design Studio"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg></div>
+    <button class="rail-item is-active"><span class="rail-icon">⌂</span>Home</button>
+    <button id="open-create" class="rail-item"><span class="rail-icon">＋</span>Create</button>
+    <button class="rail-item"><span class="rail-icon">▱</span>Projects</button>
+    <button class="rail-item"><span class="rail-icon">◫</span>Templates</button>
+    <button class="rail-item"><span class="rail-icon">◎</span>Eco data</button>
+    <button class="rail-item"><span class="rail-icon">✦</span>Analysis</button>
+    <div style="flex:1"></div>
+    <button class="rail-item"><span class="rail-icon">?</span>Help</button>
+  </nav>
+  <div class="home-main">
+    <section class="home-hero">
+      <h1>What will you analyse today?</h1>
+      <p>Turn environmental data, places and boundaries into clear, decision-ready map designs.</p>
+      <form id="home-search-form" class="home-search">
+        <svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#171321" stroke-width="2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input id="home-search-input" placeholder="Search flood risk, land use, study areas or locations" aria-label="Search environmental designs" />
+        <button type="submit">Start analysis</button>
+      </form>
+      <div class="quick-row">
+        <button class="quick-action" data-template="site"><span class="quick-bubble" style="background:#0369a1">⌖</span>Site assessment</button>
+        <button class="quick-action" data-template="boundary"><span class="quick-bubble" style="background:#0f766e">⬡</span>Study boundary</button>
+        <button class="quick-action" data-template="landuse"><span class="quick-bubble" style="background:#0284c7">▦</span>Land use</button>
+        <button class="quick-action" data-template="analysis"><span class="quick-bubble" style="background:#ea580c">◒</span>Risk analysis</button>
+        <button class="quick-action" data-template="studyarea"><span class="quick-bubble" style="background:#0891b2">▤</span>Impact report</button>
+        <button id="quick-custom" class="quick-action"><span class="quick-bubble" style="background:#475569">＋</span>Custom analysis</button>
+      </div>
+    </section>
+    <section class="home-section" id="environmental-templates">
+      <div class="section-head"><div><h2>Environmental map templates</h2><p class="mt-1 text-sm text-slate-500">Original designs informed by established cartographic techniques.</p></div><button id="browse-templates">Browse templates</button></div>
+      <div class="template-filters" aria-label="Template categories">
+        <button class="template-filter is-active" data-filter="all">All templates</button><button class="template-filter" data-filter="artistic">Artistic maps</button><button class="template-filter" data-filter="vintage">Vintage maps</button><button class="template-filter" data-filter="cartographic">Cartographic maps</button><button class="template-filter" data-filter="topographic">Topographic</button><button class="template-filter" data-filter="3d">3D maps</button><button class="template-filter" data-filter="analysis">Analysis maps</button><button class="template-filter" data-filter="editorial">Editorial</button><button class="template-filter" data-filter="report">Field reports</button>
+      </div>
+      <div class="template-showcase">
+        <button class="style-card" data-category="artistic analysis" data-template="analysis"><div class="style-preview preview-firefly"><span class="style-label">Risk & exposure</span><span class="map-grid"></span><span class="layout-overlay" data-title="Luminous Risk Assessment"></span><span class="map-scale"></span><span class="map-inset"></span><span class="map-coords">7°30′E · 9°04′N</span></div><h3>Luminous Risk</h3><p>Full map furniture · landscape · inset map · luminous thematic symbols.</p></button>
+        <button class="style-card" data-category="artistic cartographic" data-template="studyarea"><div class="style-preview preview-watercolor"><span class="style-label">Watershed planning</span><span class="map-grid"></span><span class="layout-overlay" data-title="Watershed Restoration Plan"></span><span class="map-scale"></span><span class="map-inset"></span><span class="map-coords">6°45′E · 8°15′N</span></div><h3>Watercolour Watershed</h3><p>Neatline · coordinate grid · locator inset · soft planning aesthetic.</p></button>
+        <button class="style-card" data-category="cartographic report" data-template="site"><div class="style-preview preview-muted"><span class="style-label">Site assessment</span><span class="map-grid"></span><span class="layout-overlay" data-title="Environmental Site Assessment"></span><span class="map-scale"></span><span class="map-inset"></span><span class="map-coords">3°24′E · 6°27′N</span></div><h3>Quiet Canvas</h3><p>Map body · title block · north arrow · scale · optional inset.</p></button>
+        <button class="style-card" data-category="report vintage" data-template="boundary"><div class="style-preview preview-duotone"><span class="style-label">Print ready</span><span class="map-grid"></span><span class="layout-overlay" data-title="Field Survey Location Map"></span><span class="map-scale"></span><span class="map-coords">5°00′E · 7°30′N</span></div><h3>Field Report Duotone</h3><p>Reproduction-safe layout · grid coordinates · strong double neatline.</p></button>
+        <button class="style-card" data-category="cartographic 3d" data-template="landuse"><div class="style-preview preview-terrain"><span class="style-label">Terrain & ecology</span><span class="map-grid"></span><span class="layout-overlay" data-title="Relief & Habitat Connectivity"></span><span class="map-scale"></span><span class="map-inset"></span><span class="map-coords">9°12′E · 10°05′N</span></div><h3>Relief & Habitat</h3><p>Terrain body · contour grid · inset context · ecological title treatment.</p></button>
+        <button class="style-card" data-category="analysis cartographic" data-template="analysis"><div class="style-preview preview-texture"><span class="style-label">Land cover</span><span class="map-grid"></span><span class="layout-overlay" data-title="Land Cover Classification"></span><span class="map-scale"></span><span class="map-inset"></span><span class="map-coords">4°18′E · 7°46′N</span></div><h3>Textured Land Cover</h3><p>Accessible patterns · coordinate grid · complete cartographic surround.</p></button>
+        <button class="style-card" data-category="vintage artistic" data-template="boundary"><div class="style-preview preview-vintage"><span class="style-label">Heritage atlas</span><span class="map-grid"></span><span class="layout-overlay" data-title="Ecological Regions Atlas"></span><span class="map-scale"></span><span class="map-inset"></span><span class="map-coords">8°00′E · 9°36′N</span></div><h3>Naturalist Field Atlas</h3><p>Vintage paper · engraved relief · classic neatline · locator inset.</p></button>
+        <button class="style-card" data-category="3d analysis" data-template="landuse"><div class="style-preview preview-3d"><span class="style-label">3D terrain</span><span class="layout-overlay" data-title="Catchment Terrain Model"></span><span class="map-scale"></span><span class="map-inset"></span><span class="map-coords">10°22′E · 9°48′N</span></div><h3>3D Catchment Terrain</h3><p>Oblique relief · elevation emphasis · orientation and inset reference.</p></button>
+        <button class="style-card" data-category="cartographic report" data-template="landuse"><div class="style-preview preview-reference"><span class="style-label">Detailed reference</span><span class="map-grid"></span><span class="layout-overlay" data-title="Aderin District Land & Water"></span><span class="map-scale"></span><span class="map-inset"></span><span class="map-coords">4°52′E · 8°34′N</span></div><h3>District Land & Water Atlas</h3><p>Dense settlements, roads, hydrography and land-cover legend for local planning.</p></button>
+        <button class="style-card" data-category="editorial vintage analysis" data-template="analysis"><div class="style-preview preview-editorial"><span class="style-label">Editorial data story</span></div><h3>Climate Bulletin Front Page</h3><p>Headline-led map story with side commentary, small charts and key findings.</p></button>
+        <button class="style-card" data-category="topographic cartographic" data-template="landuse"><div class="style-preview preview-elevation"><span class="style-label">Elevation poster</span><span class="layout-overlay" data-title="Koru Caldera Topography"></span><span class="map-scale"></span><span class="map-inset"></span></div><h3>Island Elevation Survey</h3><p>Hypsometric terrain, vertical colour scale, locator inset and survey metadata.</p></button>
+        <button class="style-card" data-category="analysis report" data-template="boundary"><div class="style-preview preview-dashboard"><span class="style-label">National profile</span><span class="layout-overlay" data-title="National Environment Profile"></span></div><h3>National Environment Dashboard</h3><p>Dark terrain map with a structured fact rail, indicators and narrative summary.</p></button>
+        <button class="style-card" data-category="topographic editorial" data-template="landuse"><div class="style-preview preview-story"><span class="style-label">Terrain narrative</span><span class="map-grid"></span><span class="layout-overlay" data-title="The Aruna Highlands"></span><span class="map-scale"></span><span class="map-inset"></span></div><h3>Highlands Field Narrative</h3><p>Large relief map framed by concise field notes, peak markers and an elevation profile.</p></button>
+        <button class="style-card" data-category="analysis editorial" data-template="analysis"><div class="style-preview preview-infographic"><span class="style-label">Thematic poster</span><span class="layout-overlay" data-title="Household Water Security"></span><span class="map-scale"></span></div><h3>Environmental Indicator Poster</h3><p>Central choropleth with explanatory callouts, chart panels and a compact legend.</p></button>
+      </div>
+    </section>
+    <section class="home-section">
+      <div class="section-head"><h2>Continue your environmental work</h2><button data-enter-editor>See all projects</button></div>
+      <div class="project-grid">
+        <button class="project-card" data-template="site"><div class="project-thumb"><div class="mini-map"></div></div><h3>Abuja Site Location</h3><p>Site map · Edited recently</p></button>
+        <button class="project-card" data-template="boundary"><div class="project-thumb" style="background:#e5ddf4"><div class="mini-map" style="filter:hue-rotate(35deg)"></div></div><h3>Nigeria Boundary Atlas</h3><p>Boundary map · A4</p></button>
+        <button class="project-card" data-template="analysis"><div class="project-thumb" style="background:#f8e3df"><div class="mini-map" style="filter:hue-rotate(290deg) saturate(1.4)"></div></div><h3>Flood Risk Overview</h3><p>Analysis map · 36 states</p></button>
+        <button class="project-card" data-template="landuse"><div class="project-thumb" style="background:#ddebec"><div class="mini-map" style="filter:grayscale(.2)"></div></div><h3>Urban Infrastructure</h3><p>Land use · Landscape</p></button>
+        <button class="project-card" data-template="studyarea"><div class="project-thumb" style="background:#eee8d8"><div class="mini-map" style="filter:sepia(.25)"></div></div><h3>Lagos Study Area</h3><p>Report map · Draft</p></button>
+      </div>
+    </section>
+  </div>
+</div>
+<div id="root" class="flex h-screen w-screen flex-col overflow-hidden">
+
+  <!-- Header -->
+  <header class="relative z-30 shrink-0 border-b border-slate-200/80 bg-white/90 backdrop-blur-md">
+    <div class="pointer-events-none absolute inset-x-0 top-0 h-16 bg-gradient-to-b from-sky-100/70 via-cyan-50/40 to-transparent opacity-80"></div>
+    <div class="relative flex w-full items-center gap-3 px-3 py-2.5 sm:gap-4 sm:px-4">
+      <div class="flex min-w-0 shrink-0 items-center gap-2.5 sm:gap-3">
+        <div class="flex h-9 w-9 items-center justify-center rounded-xl border border-sky-200 bg-sky-50 text-sky-700 sm:h-10 sm:w-10">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg>
+        </div>
+        <div class="min-w-0">
+          <h1 class="font-display truncate text-base font-semibold tracking-tight sm:text-lg">GIS Design Studio</h1>
+          <p class="hidden truncate text-[11px] text-slate-500 lg:block">Template-based map creation · open data · Geoinfotech Resources Limited</p>
+        </div>
+      </div>
+      <div class="mx-auto flex min-w-0 w-full max-w-md flex-1 items-center gap-2">
+        <div class="hidden w-full items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 sm:flex">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <span class="truncate text-[12px] text-slate-400">Search a place to center the map…</span>
+        </div>
+      </div>
+      <div class="flex shrink-0 items-center gap-1.5 sm:gap-2">
+        <div class="hidden items-center gap-1.5 rounded-full border border-teal-200 bg-teal-50 px-2.5 py-1 text-teal-800 md:inline-flex">
+          <span class="h-1.5 w-1.5 rounded-full bg-teal-500"></span>
+          <span class="text-[11px] font-medium">Prototype</span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Body -->
+  <div class="relative flex min-h-0 flex-1">
+
+    <!-- Left: Study area + Template gallery -->
+    <aside class="flex w-72 shrink-0 flex-col overflow-y-auto border-r border-slate-200 bg-white">
+
+      <div class="border-b border-slate-100 px-4 py-3">
+        <p class="gds-panel-title">Study area</p>
+        <p class="mt-1 text-[12px] text-slate-500">Choose a boundary — its shapefile loads on the map for analysis.</p>
+
+        <div class="mt-2.5 space-y-2">
+          <select id="sa-level" class="gds-input">
+            <option value="country">Country</option>
+            <option value="state" selected>State</option>
+            <option value="lga">LGA</option>
+          </select>
+
+          <div id="sa-state-wrap">
+            <input id="sa-state" list="sa-state-list" class="gds-input" placeholder="e.g. Lagos" />
+            <datalist id="sa-state-list"></datalist>
+          </div>
+          <div id="sa-lga-wrap" class="hidden">
+            <input id="sa-lga" class="gds-input" placeholder="e.g. Ikeja" />
+          </div>
+
+          <button id="sa-load-btn" type="button" class="gds-btn-primary w-full">Load boundary</button>
+          <p id="sa-status" class="text-[11px] leading-snug text-slate-500"></p>
+        </div>
+      </div>
+
+      <div class="border-b border-slate-100 px-4 py-3">
+        <p class="gds-panel-title">Map templates</p>
+        <p class="mt-1 text-[12px] text-slate-500">Pick a starting layout, then customize.</p>
+      </div>
+      <div id="template-list" class="space-y-2.5 px-3 py-3"></div>
+      <div class="border-t border-slate-100 px-4 py-3">
+        <button id="save-template-btn" type="button" class="w-full rounded-lg border border-dashed border-slate-300 px-3 py-2 text-[12px] font-semibold text-slate-500 hover:border-sky-300 hover:text-sky-700">
+          + Save current view as template
+        </button>
+      </div>
+    </aside>
+
+    <!-- Center: Map canvas -->
+    <main id="map-wrap" class="relative min-w-0 flex-1 bg-slate-100">
+      <div id="map"></div>
+
+      <div class="gds-map-overlay-card absolute right-3 top-3 z-30 flex gap-0.5 p-1">
+        <button data-basemap="liberty" class="gds-basemap-btn rounded-md px-2.5 py-1 text-[11px] font-semibold">Liberty</button>
+        <button data-basemap="bright" class="gds-basemap-btn rounded-md px-2.5 py-1 text-[11px] font-semibold">Bright</button>
+        <button data-basemap="positron" class="gds-basemap-btn rounded-md px-2.5 py-1 text-[11px] font-semibold">Positron</button>
+      </div>
+
+      <!-- Artboard: the printable page. Drag the cards inside it like Canva. -->
+      <div id="artboard" class="z-20">
+        <div id="artboard-label" class="absolute -top-6 left-0 whitespace-nowrap rounded bg-white/85 px-2 py-0.5 text-[11px] font-semibold text-sky-700"></div>
+
+        <div id="el-title" class="gds-draggable gds-card px-3 py-2" style="left:4%; top:4%;">
+          <span class="gds-drag-hint">✥</span>
+          <p id="title-band-name" class="font-display text-sm font-semibold leading-tight">Site Location Map</p>
+          <p class="text-[10px] text-slate-500">GIS Design Studio · Geoinfotech Resources Limited</p>
+        </div>
+
+        <div id="el-legend" class="gds-draggable gds-card w-48 px-3 py-2.5" style="left:4%; top:68%;">
+          <span class="gds-drag-hint">✥</span>
+          <p class="gds-panel-title mb-1.5">Legend</p>
+          <div id="legend-body" class="space-y-1 text-[12px] text-slate-700"></div>
+        </div>
+
+        <div id="el-stats" class="gds-draggable gds-card w-48 px-3 py-2.5" style="left:4%; top:48%; display:none;">
+          <span class="gds-drag-hint">✥</span>
+          <p class="gds-panel-title mb-1">Study area</p>
+          <p id="stats-name" class="text-[13px] font-semibold text-slate-800"></p>
+          <p id="stats-area" class="text-[11px] text-slate-500"></p>
+        </div>
+
+        <div id="el-northarrow" class="gds-draggable gds-card flex items-center gap-3 px-3 py-2" style="left:76%; top:86%;">
+          <span class="gds-drag-hint">✥</span>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0f172a" stroke-width="1.6"><polygon points="12 2 15 20 12 16 9 20 12 2"/></svg>
+          <span id="scale-label" class="text-[11px] font-medium text-slate-600">— km</span>
+        </div>
+      </div>
+    </main>
+
+    <!-- Right: Layers + Page setup + Export -->
+    <aside class="flex w-72 shrink-0 flex-col overflow-y-auto border-l border-slate-200 bg-white">
+      <div class="border-b border-slate-100 px-4 py-3">
+        <p class="gds-panel-title">Layers</p>
+        <p class="mt-1 text-[12px] text-slate-500">Toggle open data on this template.</p>
+      </div>
+      <div id="layer-list" class="space-y-1 px-3 py-3"></div>
+
+      <div class="border-t border-slate-100 px-4 py-3">
+        <p class="gds-panel-title mb-2">Page setup</p>
+        <select id="paper-size-select" class="gds-input">
+          <option value="a4">A4</option>
+          <option value="a3">A3</option>
+          <option value="letter">US Letter</option>
+          <option value="legal">US Legal</option>
+          <option value="social">Social Square</option>
+        </select>
+        <div class="mt-2 inline-flex w-full rounded-lg border border-slate-200 bg-slate-100 p-0.5">
+          <button data-orientation="portrait" class="gds-orientation-btn flex-1 rounded-md px-2.5 py-1 text-[11px] font-semibold transition">Portrait</button>
+          <button data-orientation="landscape" class="gds-orientation-btn flex-1 rounded-md px-2.5 py-1 text-[11px] font-semibold transition">Landscape</button>
+        </div>
+        <button id="reset-layout-btn" type="button" class="mt-2 w-full rounded-lg border border-slate-200 px-3 py-1.5 text-[11px] font-semibold text-slate-500 hover:border-slate-300">
+          Reset element layout
+        </button>
+      </div>
+
+      <div class="mt-auto border-t border-slate-100 px-4 py-3">
+        <p class="gds-panel-title mb-2">Export</p>
+        <div class="space-y-2">
+          <button id="export-png-btn" type="button" class="w-full rounded-lg bg-sky-700 px-3 py-2 text-[12px] font-semibold text-white hover:bg-sky-800">Export PNG</button>
+          <button id="export-pdf-btn" type="button" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-[12px] font-semibold text-slate-700 hover:border-slate-400">Export PDF (print layout)</button>
+        </div>
+        <p class="mt-2 text-[10px] leading-snug text-slate-400">Exports exactly the artboard area, at the chosen paper size — drag elements first, they'll export where you placed them.</p>
+      </div>
+    </aside>
+  </div>
+
+  <footer class="shrink-0 border-t border-slate-200 bg-white px-4 py-1.5 text-center text-[10px] text-slate-400">
+    Basemap © OpenFreeMap, © OpenMapTiles, © OpenStreetMap contributors · Boundaries © OpenStreetMap contributors via Nominatim · Sample analysis layer is synthetic demonstration data
+  </footer>
+</div>
+
+<script>
+/* ============================================================
+   GIS Design Studio — prototype v2
+   Adds: study-area boundary lookup (country / state / LGA via
+   OSM Nominatim), a 5th template, Canva-style drag-and-drop
+   layout elements on a paper-size artboard, and export that
+   crops exactly the artboard region at the chosen paper size.
+   ============================================================ */
+
+const BASEMAPS = {
+  liberty: "https://tiles.openfreemap.org/styles/liberty",
+  bright: "https://tiles.openfreemap.org/styles/bright",
+  positron: "https://tiles.openfreemap.org/styles/positron",
+};
+
+const LAYER_GROUPS = {
+  roads: ["road", "transportation", "bridge", "tunnel"],
+  water: ["water", "waterway"],
+  buildings: ["building"],
+  boundaries: ["boundary"],
+};
+
+const RISK_COLORS = {
+  "Watch": "#fbbf24", "Warning": "#f97316", "High": "#ea580c",
+  "Very High": "#dc2626", "Severe": "#b91c1c", "default": "#94a3b8",
+};
+
+const NIGERIA_STATES = ["Abia","Adamawa","Akwa Ibom","Anambra","Bauchi","Bayelsa","Benue","Borno",
+  "Cross River","Delta","Ebonyi","Edo","Ekiti","Enugu","Gombe","Imo","Jigawa","Kaduna","Kano",
+  "Katsina","Kebbi","Kogi","Kwara","Lagos","Nasarawa","Niger","Ogun","Ondo","Osun","Oyo","Plateau",
+  "Rivers","Sokoto","Taraba","Yobe","Zamfara","Federal Capital Territory"];
+
+const PAPER_SIZES = {
+  a4: { label: "A4", wIn: 8.27, hIn: 11.69 },
+  a3: { label: "A3", wIn: 11.69, hIn: 16.54 },
+  letter: { label: "US Letter", wIn: 8.5, hIn: 11 },
+  legal: { label: "US Legal", wIn: 8.5, hIn: 14 },
+  social: { label: "Social Square", wIn: 8, hIn: 8 },
+};
+const EXPORT_DPI = 150;
+
+const SAMPLE_ANALYSIS_LAYER = {"type":"FeatureCollection","features":[{"type":"Feature","geometry":{"type":"MultiPolygon","coordinates":[[[[5.94,7.199999999999999],[7.54,7.199999999999999],[7.54,8.4],[5.94,8.4],[5.94,7.199999999999999]]]]},"properties":{"name":"Kogi","risk_score":0.557,"risk_tier":"Warning"}},{"type":"Feature","geometry":{"type":"MultiPolygon","coordinates":[[[[5.98,5.619999999999999],[7.58,5.619999999999999],[7.58,6.82],[5.98,6.82],[5.98,5.619999999999999]]]]},"properties":{"name":"Anambra","risk_score":0.544,"risk_tier":"Warning"}},{"type":"Feature","geometry":{"type":"MultiPolygon","coordinates":[[[[5.15,4.9],[6.75,4.9],[6.75,6.1],[5.15,6.1],[5.15,4.9]]]]},"properties":{"name":"Delta","risk_score":0.55,"risk_tier":"Warning"}},{"type":"Feature","geometry":{"type":"MultiPolygon","coordinates":[[[[6.22,4.25],[7.819999999999999,4.25],[7.819999999999999,5.449999999999999],[6.22,5.449999999999999],[6.22,4.25]]]]},"properties":{"name":"Rivers","risk_score":0.539,"risk_tier":"Warning"}},{"type":"Feature","geometry":{"type":"MultiPolygon","coordinates":[[[[5.2700000000000005,4.18],[6.87,4.18],[6.87,5.380000000000001],[5.2700000000000005,5.380000000000001],[5.2700000000000005,4.18]]]]},"properties":{"name":"Bayelsa","risk_score":0.57,"risk_tier":"Warning"}},{"type":"Feature","geometry":{"type":"MultiPolygon","coordinates":[[[[7.53,5.27],[9.13,5.27],[9.13,6.470000000000001],[7.53,6.470000000000001],[7.53,5.27]]]]},"properties":{"name":"Cross River","risk_score":0.451,"risk_tier":"Watch"}},{"type":"Feature","geometry":{"type":"MultiPolygon","coordinates":[[[[5.3100000000000005,5.74],[6.91,5.74],[6.91,6.9399999999999995],[5.3100000000000005,6.9399999999999995],[5.3100000000000005,5.74]]]]},"properties":{"name":"Edo","risk_score":0.492,"risk_tier":"Watch"}},{"type":"Feature","geometry":{"type":"MultiPolygon","coordinates":[[[[6.25,4.970000000000001],[7.85,4.970000000000001],[7.85,6.17],[6.25,6.17],[6.25,4.970000000000001]]]]},"properties":{"name":"Imo","risk_score":0.428,"risk_tier":"Watch"}},{"type":"Feature","geometry":{"type":"MultiPolygon","coordinates":[[[[6.71,5.84],[8.31,5.84],[8.31,7.040000000000001],[6.71,7.040000000000001],[6.71,5.84]]]]},"properties":{"name":"Enugu","risk_score":0.405,"risk_tier":"Watch"}},{"type":"Feature","geometry":{"type":"MultiPolygon","coordinates":[[[[7.29,5.66],[8.89,5.66],[8.89,6.859999999999999],[7.29,6.859999999999999],[7.29,5.66]]]]},"properties":{"name":"Ebonyi","risk_score":0.398,"risk_tier":"Watch"}},{"type":"Feature","geometry":{"type":"MultiPolygon","coordinates":[[[[6.92,9.92],[8.52,9.92],[8.52,11.12],[6.92,11.12],[6.92,9.92]]]]},"properties":{"name":"Kaduna","risk_score":0.479,"risk_tier":"Watch"}},{"type":"Feature","geometry":{"type":"MultiPolygon","coordinates":[[[[4.78,9.33],[6.38,9.33],[6.38,10.53],[4.78,10.53],[4.78,9.33]]]]},"properties":{"name":"Niger","risk_score":0.518,"risk_tier":"Warning"}},{"type":"Feature","geometry":{"type":"MultiPolygon","coordinates":[[[[3.4000000000000004,11.85],[5.0,11.85],[5.0,13.049999999999999],[3.4000000000000004,13.049999999999999],[3.4000000000000004,11.85]]]]},"properties":{"name":"Kebbi","risk_score":0.505,"risk_tier":"Warning"}},{"type":"Feature","geometry":{"type":"MultiPolygon","coordinates":[[[[4.44,12.46],[6.04,12.46],[6.04,13.66],[4.44,13.66],[4.44,12.46]]]]},"properties":{"name":"Sokoto","risk_score":0.492,"risk_tier":"Watch"}},{"type":"Feature","geometry":{"type":"MultiPolygon","coordinates":[[[[5.42,11.57],[7.02,11.57],[7.02,12.77],[5.42,12.77],[5.42,11.57]]]]},"properties":{"name":"Zamfara","risk_score":0.405,"risk_tier":"Watch"}},{"type":"Feature","geometry":{"type":"MultiPolygon","coordinates":[[[[6.8,12.38],[8.4,12.38],[8.4,13.58],[6.8,13.58],[6.8,12.38]]]]},"properties":{"name":"Katsina","risk_score":0.393,"risk_tier":"Watch"}},{"type":"Feature","geometry":{"type":"MultiPolygon","coordinates":[[[[7.72,11.450000000000001],[9.32,11.450000000000001],[9.32,12.65],[7.72,12.65],[7.72,11.450000000000001]]]]},"properties":{"name":"Kano","risk_score":0.412,"risk_tier":"Watch"}},{"type":"Feature","geometry":{"type":"MultiPolygon","coordinates":[[[[8.76,11.620000000000001],[10.360000000000001,11.620000000000001],[10.360000000000001,12.82],[8.76,12.82],[8.76,11.620000000000001]]]]},"properties":{"name":"Jigawa","risk_score":0.416,"risk_tier":"Watch"}},{"type":"Feature","geometry":{"type":"MultiPolygon","coordinates":[[[[11.17,11.69],[12.770000000000001,11.69],[12.770000000000001,12.889999999999999],[11.17,12.889999999999999],[11.17,11.69]]]]},"properties":{"name":"Yobe","risk_score":0.381,"risk_tier":"Watch"}},{"type":"Feature","geometry":{"type":"MultiPolygon","coordinates":[[[[12.36,11.25],[13.96,11.25],[13.96,12.45],[12.36,12.45],[12.36,11.25]]]]},"properties":{"name":"Borno","risk_score":0.393,"risk_tier":"Watch"}},{"type":"Feature","geometry":{"type":"MultiPolygon","coordinates":[[[[11.59,8.73],[13.190000000000001,8.73],[13.190000000000001,9.93],[11.59,9.93],[11.59,8.73]]]]},"properties":{"name":"Adamawa","risk_score":0.466,"risk_tier":"Watch"}},{"type":"Feature","geometry":{"type":"MultiPolygon","coordinates":[[[[10.639999999999999,7.4],[12.24,7.4],[12.24,8.6],[10.639999999999999,8.6],[10.639999999999999,7.4]]]]},"properties":{"name":"Taraba","risk_score":0.479,"risk_tier":"Watch"}},{"type":"Feature","geometry":{"type":"MultiPolygon","coordinates":[[[[10.37,9.69],[11.97,9.69],[11.97,10.889999999999999],[10.37,10.889999999999999],[10.37,9.69]]]]},"properties":{"name":"Gombe","risk_score":0.398,"risk_tier":"Watch"}},{"type":"Feature","geometry":{"type":"MultiPolygon","coordinates":[[[[9.04,9.71],[10.64,9.71],[10.64,10.91],[9.04,10.91],[9.04,9.71]]]]},"properties":{"name":"Bauchi","risk_score":0.4,"risk_tier":"Watch"}},{"type":"Feature","geometry":{"type":"MultiPolygon","coordinates":[[[[8.09,8.620000000000001],[9.690000000000001,8.620000000000001],[9.690000000000001,9.82],[8.09,9.82],[8.09,8.620000000000001]]]]},"properties":{"name":"Plateau","risk_score":0.388,"risk_tier":"Watch"}},{"type":"Feature","geometry":{"type":"MultiPolygon","coordinates":[[[[7.72,7.9],[9.32,7.9],[9.32,9.1],[7.72,9.1],[7.72,7.9]]]]},"properties":{"name":"Nassarawa","risk_score":0.466,"risk_tier":"Watch"}},{"type":"Feature","geometry":{"type":"MultiPolygon","coordinates":[[[[7.94,6.74],[9.540000000000001,6.74],[9.540000000000001,7.9399999999999995],[7.94,7.9399999999999995],[7.94,6.74]]]]},"properties":{"name":"Benue","risk_score":0.531,"risk_tier":"Warning"}},{"type":"Feature","geometry":{"type":"MultiPolygon","coordinates":[[[[3.75,7.890000000000001],[5.35,7.890000000000001],[5.35,9.09],[3.75,9.09],[3.75,7.890000000000001]]]]},"properties":{"name":"Kwara","risk_score":0.492,"risk_tier":"Watch"}},{"type":"Feature","geometry":{"type":"MultiPolygon","coordinates":[[[[3.1500000000000004,7.5600000000000005],[4.75,7.5600000000000005],[4.75,8.76],[3.1500000000000004,8.76],[3.1500000000000004,7.5600000000000005]]]]},"properties":{"name":"Oyo","risk_score":0.412,"risk_tier":"Watch"}},{"type":"Feature","geometry":{"type":"MultiPolygon","coordinates":[[[[3.7800000000000002,6.959999999999999],[5.38,6.959999999999999],[5.38,8.16],[3.7800000000000002,8.16],[3.7800000000000002,6.959999999999999]]]]},"properties":{"name":"Osun","risk_score":0.405,"risk_tier":"Watch"}},{"type":"Feature","geometry":{"type":"MultiPolygon","coordinates":[[[[4.04,6.5],[5.64,6.5],[5.64,7.699999999999999],[4.04,7.699999999999999],[4.04,6.5]]]]},"properties":{"name":"Ondo","risk_score":0.421,"risk_tier":"Watch"}},{"type":"Feature","geometry":{"type":"MultiPolygon","coordinates":[[[[4.42,7.02],[6.02,7.02],[6.02,8.22],[4.42,8.22],[4.42,7.02]]]]},"properties":{"name":"Ekiti","risk_score":0.393,"risk_tier":"Watch"}},{"type":"Feature","geometry":{"type":"MultiPolygon","coordinates":[[[[2.58,5.92],[4.18,5.92],[4.18,7.119999999999999],[2.58,7.119999999999999],[2.58,5.92]]]]},"properties":{"name":"Lagos","risk_score":0.531,"risk_tier":"Warning"}},{"type":"Feature","geometry":{"type":"MultiPolygon","coordinates":[[[[2.55,6.5600000000000005],[4.15,6.5600000000000005],[4.15,7.76],[2.55,7.76],[2.55,6.5600000000000005]]]]},"properties":{"name":"Ogun","risk_score":0.479,"risk_tier":"Watch"}},{"type":"Feature","geometry":{"type":"MultiPolygon","coordinates":[[[[6.69,8.48],[8.290000000000001,8.48],[8.290000000000001,9.68],[6.69,9.68],[6.69,8.48]]]]},"properties":{"name":"Abuja FCT","risk_score":0.398,"risk_tier":"Watch"}},{"type":"Feature","geometry":{"type":"MultiPolygon","coordinates":[[[[6.72,4.85],[8.32,4.85],[8.32,6.050000000000001],[6.72,6.050000000000001],[6.72,4.85]]]]},"properties":{"name":"Abia","risk_score":0.416,"risk_tier":"Watch"}},{"type":"Feature","geometry":{"type":"MultiPolygon","coordinates":[[[[7.05,4.300000000000001],[8.65,4.300000000000001],[8.65,5.5],[7.05,5.5],[7.05,4.300000000000001]]]]},"properties":{"name":"Akwa Ibom","risk_score":0.518,"risk_tier":"Warning"}}]};
+
+const TEMPLATES = [
+  {
+    id: "site", name: "Site Location Map",
+    desc: "Point of interest with a buffer ring — proposals, inspections, site briefs.",
+    center: [7.4951, 9.0579], zoom: 12.5,
+    layers: { roads: true, water: true, buildings: true, boundaries: false, analysis: false, siteMarker: true, studyArea: false },
+    legend: [ { label: "Site location", color: "#0369a1" }, { label: "500 m buffer", color: "#38bdf8" } ],
+  },
+  {
+    id: "boundary", name: "Administrative Boundary Map",
+    desc: "Administrative context — states, LGAs and country outline.",
+    center: [8.0, 9.6], zoom: 5.4,
+    layers: { roads: false, water: true, buildings: false, boundaries: true, analysis: false, siteMarker: false, studyArea: false },
+    legend: [ { label: "State boundary", color: "#0f172a" }, { label: "Waterbody", color: "#38bdf8" } ],
+  },
+  {
+    id: "landuse", name: "Land Use / Infrastructure Map",
+    desc: "Roads and built-up areas at city scale for planning reports.",
+    center: [7.4951, 9.0765], zoom: 13.5,
+    layers: { roads: true, water: true, buildings: true, boundaries: false, analysis: false, siteMarker: false, studyArea: false },
+    legend: [ { label: "Road network", color: "#0f172a" }, { label: "Building footprint", color: "#94a3b8" } ],
+  },
+  {
+    id: "analysis", name: "Analysis / Risk Map",
+    desc: "Drop in an analysis result as a styled choropleth (sample data).",
+    center: [8.0, 9.6], zoom: 5.4,
+    layers: { roads: false, water: false, buildings: false, boundaries: true, analysis: true, siteMarker: false, studyArea: false },
+    legend: [ { label: "Watch", color: RISK_COLORS.Watch }, { label: "Warning", color: RISK_COLORS.Warning },
+              { label: "High", color: RISK_COLORS.High }, { label: "Very High", color: RISK_COLORS["Very High"] } ],
+  },
+  {
+    id: "studyarea", name: "Study Area Report Map",
+    desc: "Loads the boundary you picked on the left as the map's focus, with an area readout.",
+    center: [8.0, 9.6], zoom: 5.4,
+    layers: { roads: true, water: true, buildings: false, boundaries: false, analysis: false, siteMarker: false, studyArea: true },
+    legend: [ { label: "Study area boundary", color: "#0369a1" } ],
+  },
+];
+
+let currentBasemap = "liberty";
+let currentTemplate = TEMPLATES[0];
+let currentPaper = "a4";
+let currentOrientation = "portrait";
+let map;
+
+const studyArea = { loaded: false, name: "", areaKm2: 0, geojson: null, bbox: null };
+
+const DEFAULT_POSITIONS = {
+  title: { left: 4, top: 4 },
+  legend: { left: 4, top: 68 },
+  stats: { left: 4, top: 48 },
+  northarrow: { left: 76, top: 86 },
+};
+let elementPositions = JSON.parse(JSON.stringify(DEFAULT_POSITIONS));
+
+/* ---------------- Geometry helpers ---------------- */
+
+function buildBufferCircle([lng, lat], radiusKm, points = 64) {
+  const coords = [];
+  const distanceX = radiusKm / (111.320 * Math.cos((lat * Math.PI) / 180));
+  const distanceY = radiusKm / 110.574;
+  for (let i = 0; i <= points; i++) {
+    const theta = (i / points) * (2 * Math.PI);
+    coords.push([lng + distanceX * Math.cos(theta), lat + distanceY * Math.sin(theta)]);
+  }
+  return { type: "Feature", geometry: { type: "Polygon", coordinates: [coords] }, properties: {} };
+}
+
+function ringAreaKm2(ring) {
+  if (ring.length < 3) return 0;
+  const toRad = (d) => (d * Math.PI) / 180;
+  const meanLat = ring.reduce((s, p) => s + p[1], 0) / ring.length;
+  const kx = 111.32 * Math.cos(toRad(meanLat));
+  const ky = 110.574;
+  let sum = 0;
+  for (let i = 0; i < ring.length - 1; i++) {
+    const x1 = ring[i][0] * kx, y1 = ring[i][1] * ky;
+    const x2 = ring[i + 1][0] * kx, y2 = ring[i + 1][1] * ky;
+    sum += x1 * y2 - x2 * y1;
+  }
+  return Math.abs(sum / 2);
+}
+
+function computeAreaKm2(geom) {
+  let polys = [];
+  if (geom.type === "Polygon") polys = [geom.coordinates];
+  else if (geom.type === "MultiPolygon") polys = geom.coordinates;
+  else return 0;
+  let total = 0;
+  polys.forEach((poly) => {
+    poly.forEach((ring, idx) => {
+      const a = ringAreaKm2(ring);
+      total += idx === 0 ? a : -a;
+    });
+  });
+  return total;
+}
+
+/* ---------------- Map setup ---------------- */
+
+function initMap() {
+  map = new maplibregl.Map({
+    container: "map", style: BASEMAPS[currentBasemap],
+    center: currentTemplate.center, zoom: currentTemplate.zoom,
+    attributionControl: false, preserveDrawingBuffer: true,
+  });
+  map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
+  map.addControl(new maplibregl.AttributionControl({ compact: true }), "bottom-right");
+
+  map.on("load", () => { addSampleSources(); applyTemplate(currentTemplate, { flyTo: false }); updateScaleLabel(); });
+  map.on("move", updateScaleLabel);
+  map.on("style.load", () => { addSampleSources(); applyLayerToggles(currentTemplate.layers); });
+}
+
+function addSampleSources() {
+  if (!map.getSource("gds-site-buffer")) {
+    map.addSource("gds-site-buffer", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+    map.addLayer({ id: "gds-site-buffer-fill", type: "fill", source: "gds-site-buffer", paint: { "fill-color": "#38bdf8", "fill-opacity": 0.18 } });
+    map.addLayer({ id: "gds-site-buffer-line", type: "line", source: "gds-site-buffer", paint: { "line-color": "#0369a1", "line-width": 1.5 } });
+  }
+  if (!map.getSource("gds-site-marker")) {
+    map.addSource("gds-site-marker", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+    map.addLayer({ id: "gds-site-marker-point", type: "circle", source: "gds-site-marker", paint: { "circle-radius": 6, "circle-color": "#0369a1", "circle-stroke-width": 2, "circle-stroke-color": "#ffffff" } });
+  }
+  if (!map.getSource("gds-analysis")) {
+    map.addSource("gds-analysis", { type: "geojson", data: SAMPLE_ANALYSIS_LAYER });
+    map.addLayer({
+      id: "gds-analysis-fill", type: "fill", source: "gds-analysis",
+      paint: { "fill-color": ["match", ["get", "risk_tier"], "Watch", RISK_COLORS.Watch, "Warning", RISK_COLORS.Warning,
+        "High", RISK_COLORS.High, "Very High", RISK_COLORS["Very High"], "Severe", RISK_COLORS.Severe, RISK_COLORS.default],
+        "fill-opacity": 0.55 },
+    });
+    map.addLayer({ id: "gds-analysis-line", type: "line", source: "gds-analysis", paint: { "line-color": "#ffffff", "line-width": 0.6 } });
+  }
+  if (!map.getSource("gds-study-area")) {
+    map.addSource("gds-study-area", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+    map.addLayer({ id: "gds-study-area-fill", type: "fill", source: "gds-study-area", paint: { "fill-color": "#0369a1", "fill-opacity": 0.12 } });
+    map.addLayer({ id: "gds-study-area-line", type: "line", source: "gds-study-area", paint: { "line-color": "#0369a1", "line-width": 2.2 } });
+  }
+  if (studyArea.loaded) map.getSource("gds-study-area").setData(studyArea.geojson);
+}
+
+function setLayerVisible(id, visible) {
+  if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", visible ? "visible" : "none");
+}
+
+function applyLayerToggles(layers) {
+  const style = map.getStyle();
+  if (style && style.layers) {
+    style.layers.forEach((l) => {
+      const id = l.id.toLowerCase();
+      Object.entries(LAYER_GROUPS).forEach(([group, substrings]) => {
+        if (substrings.some((s) => id.includes(s))) {
+          const on = layers[group];
+          if (on !== undefined) { try { map.setLayoutProperty(l.id, "visibility", on ? "visible" : "none"); } catch (e) {} }
+        }
+      });
+    });
+  }
+  setLayerVisible("gds-analysis-fill", !!layers.analysis);
+  setLayerVisible("gds-analysis-line", !!layers.analysis);
+  setLayerVisible("gds-site-buffer-fill", !!layers.siteMarker);
+  setLayerVisible("gds-site-buffer-line", !!layers.siteMarker);
+  setLayerVisible("gds-site-marker-point", !!layers.siteMarker);
+  setLayerVisible("gds-study-area-fill", !!layers.studyArea);
+  setLayerVisible("gds-study-area-line", !!layers.studyArea);
+
+  if (layers.siteMarker) {
+    const center = currentTemplate.center;
+    map.getSource("gds-site-marker").setData({ type: "FeatureCollection", features: [{ type: "Feature", geometry: { type: "Point", coordinates: center }, properties: {} }] });
+    map.getSource("gds-site-buffer").setData({ type: "FeatureCollection", features: [buildBufferCircle(center, 0.5)] });
+  }
+
+  document.getElementById("el-stats").style.display = layers.studyArea && studyArea.loaded ? "block" : "none";
+
+  syncLayerCheckboxes(layers);
+}
+
+function applyTemplate(template, { flyTo = true } = {}) {
+  currentTemplate = template;
+  document.getElementById("title-band-name").textContent = template.name;
+  renderLegend(template.legend);
+  applyLayerToggles(template.layers);
+  if (flyTo) {
+    if (template.id === "studyarea" && studyArea.loaded && studyArea.bbox) {
+      map.fitBounds([[studyArea.bbox[0], studyArea.bbox[1]], [studyArea.bbox[2], studyArea.bbox[3]]], { padding: 60, duration: 800 });
+    } else {
+      map.flyTo({ center: template.center, zoom: template.zoom, essential: true });
+    }
+  }
+  document.querySelectorAll(".gds-template-card").forEach((el) => el.classList.toggle("is-active", el.dataset.templateId === template.id));
+}
+
+function renderLegend(items) {
+  const body = document.getElementById("legend-body");
+  body.innerHTML = "";
+  items.forEach((item) => {
+    const row = document.createElement("div");
+    row.className = "flex items-center gap-2";
+    row.innerHTML = `<span class="gds-swatch" style="background:${item.color}"></span><span>${item.label}</span>`;
+    body.appendChild(row);
+  });
+}
+
+function updateScaleLabel() {
+  if (!map) return;
+  const center = map.getCenter();
+  const zoom = map.getZoom();
+  const metersPerPixel = (156543.03392 * Math.cos((center.lat * Math.PI) / 180)) / Math.pow(2, zoom);
+  const km = (metersPerPixel * 120) / 1000;
+  document.getElementById("scale-label").textContent = `≈ ${km.toFixed(km < 1 ? 2 : 0)} km / 120px`;
+}
+
+/* ---------------- Study area lookup (OSM Nominatim) ---------------- */
+
+function setStudyAreaStatus(msg) { document.getElementById("sa-status").textContent = msg; }
+
+async function loadStudyArea() {
+  const level = document.getElementById("sa-level").value;
+  let query = "";
+  if (level === "country") query = "Nigeria";
+  else if (level === "state") query = `${document.getElementById("sa-state").value.trim()} State, Nigeria`;
+  else query = `${document.getElementById("sa-lga").value.trim()}, Nigeria`;
+
+  if (level !== "country" && query.replace(/,?\s*Nigeria$/, "").trim() === "") {
+    setStudyAreaStatus("Enter a name first.");
+    return;
+  }
+
+  setStudyAreaStatus("Loading boundary…");
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?format=geojson&polygon_geojson=1&countrycodes=ng&limit=1&q=${encodeURIComponent(query)}`;
+    const res = await fetch(url);
+    const data = await res.json();
+    if (!data.features || !data.features.length) {
+      setStudyAreaStatus("No boundary found — try a different name.");
+      return;
+    }
+    const feature = data.features[0];
+    studyArea.loaded = true;
+    studyArea.name = (feature.properties.display_name || query).split(",")[0];
+    studyArea.geojson = { type: "FeatureCollection", features: [feature] };
+    studyArea.areaKm2 = computeAreaKm2(feature.geometry);
+    studyArea.bbox = feature.bbox;
+
+    map.getSource("gds-study-area").setData(studyArea.geojson);
+    currentTemplate.layers.studyArea = true;
+    applyLayerToggles(currentTemplate.layers);
+
+    if (feature.bbox) map.fitBounds([[feature.bbox[0], feature.bbox[1]], [feature.bbox[2], feature.bbox[3]]], { padding: 60, duration: 800 });
+
+    const areaText = studyArea.areaKm2 ? `≈ ${studyArea.areaKm2.toLocaleString(undefined, { maximumFractionDigits: 0 })} km² (approx., from boundary geometry)` : "Area unavailable for this boundary";
+    setStudyAreaStatus(`Loaded: ${studyArea.name}. ${areaText}`);
+    document.getElementById("stats-name").textContent = studyArea.name;
+    document.getElementById("stats-area").textContent = areaText;
+  } catch (err) {
+    console.error(err);
+    setStudyAreaStatus("Could not reach the boundary lookup service. Try again.");
+  }
+}
+
+/* ---------------- Templates / Layers UI ---------------- */
+
+function renderTemplateList() {
+  const list = document.getElementById("template-list");
+  list.innerHTML = "";
+  TEMPLATES.forEach((t) => {
+    const card = document.createElement("div");
+    card.className = "gds-card gds-template-card px-3 py-2.5";
+    card.dataset.templateId = t.id;
+    card.innerHTML = `<p class="text-[13px] font-semibold text-slate-800">${t.name}</p><p class="mt-0.5 text-[11px] leading-snug text-slate-500">${t.desc}</p>`;
+    card.addEventListener("click", () => applyTemplate(t));
+    list.appendChild(card);
+  });
+}
+
+function renderLayerList() {
+  const wrap = document.getElementById("layer-list");
+  const groups = [
+    { key: "roads", label: "Roads" }, { key: "water", label: "Waterbodies" },
+    { key: "buildings", label: "Buildings" }, { key: "boundaries", label: "Admin boundaries" },
+    { key: "analysis", label: "Sample analysis layer" }, { key: "siteMarker", label: "Site + buffer" },
+    { key: "studyArea", label: "Study area boundary" },
+  ];
+  wrap.innerHTML = "";
+  groups.forEach((g) => {
+    const row = document.createElement("label");
+    row.className = "gds-toggle w-full justify-between hover:bg-slate-50 cursor-pointer";
+    row.innerHTML = `<span>${g.label}</span><input type="checkbox" data-layer-key="${g.key}" class="h-3.5 w-3.5 accent-sky-700" />`;
+    wrap.appendChild(row);
+  });
+  wrap.querySelectorAll("input[type=checkbox]").forEach((box) => {
+    box.addEventListener("change", (e) => {
+      currentTemplate.layers[e.target.dataset.layerKey] = e.target.checked;
+      applyLayerToggles(currentTemplate.layers);
+    });
+  });
+}
+
+function syncLayerCheckboxes(layers) {
+  document.querySelectorAll("#layer-list input[type=checkbox]").forEach((box) => { box.checked = !!layers[box.dataset.layerKey]; });
+}
+
+function wireBasemapSwitcher() {
+  const buttons = document.querySelectorAll(".gds-basemap-btn");
+  function refreshActive() {
+    buttons.forEach((b) => {
+      const active = b.dataset.basemap === currentBasemap;
+      b.classList.toggle("bg-sky-700", active); b.classList.toggle("text-white", active); b.classList.toggle("text-slate-600", !active);
+    });
+  }
+  buttons.forEach((btn) => btn.addEventListener("click", () => { currentBasemap = btn.dataset.basemap; refreshActive(); map.setStyle(BASEMAPS[currentBasemap]); }));
+  refreshActive();
+}
+
+function wireStudyAreaForm() {
+  const levelSel = document.getElementById("sa-level");
+  const stateWrap = document.getElementById("sa-state-wrap");
+  const lgaWrap = document.getElementById("sa-lga-wrap");
+  const stateList = document.getElementById("sa-state-list");
+  NIGERIA_STATES.forEach((s) => { const opt = document.createElement("option"); opt.value = s; stateList.appendChild(opt); });
+
+  function refresh() {
+    const level = levelSel.value;
+    stateWrap.classList.toggle("hidden", level !== "state");
+    lgaWrap.classList.toggle("hidden", level !== "lga");
+  }
+  levelSel.addEventListener("change", refresh);
+  refresh();
+  document.getElementById("sa-load-btn").addEventListener("click", loadStudyArea);
+}
+
+/* ---------------- Artboard: paper size + drag & drop ---------------- */
+
+function currentPaperDims() {
+  const p = PAPER_SIZES[currentPaper];
+  let w = p.wIn, h = p.hIn;
+  if (currentOrientation === "landscape" && h > w) { [w, h] = [h, w]; }
+  if (currentOrientation === "portrait" && w > h) { [w, h] = [h, w]; }
+  return { wIn: w, hIn: h };
+}
+
+function updateArtboardSize() {
+  const wrapRect = document.getElementById("map-wrap").getBoundingClientRect();
+  const { wIn, hIn } = currentPaperDims();
+  const scale = Math.min((wrapRect.width * 0.66) / wIn, (wrapRect.height * 0.74) / hIn);
+  const artboard = document.getElementById("artboard");
+  const wPx = Math.round(wIn * scale), hPx = Math.round(hIn * scale);
+  artboard.style.width = wPx + "px";
+  artboard.style.height = hPx + "px";
+  artboard.style.left = Math.round((wrapRect.width - wPx) / 2) + "px";
+  artboard.style.top = Math.round((wrapRect.height - hPx) / 2 + 8) + "px";
+  artboard.style.border = "2px dashed #0369a1";
+  artboard.style.background = "transparent";
+  artboard.style.pointerEvents = "none";
+
+  const outW = Math.round(wIn * EXPORT_DPI), outH = Math.round(hIn * EXPORT_DPI);
+  document.getElementById("artboard-label").textContent =
+    `${PAPER_SIZES[currentPaper].label} · ${currentOrientation === "portrait" ? "Portrait" : "Landscape"} · ${outW}×${outH}px @${EXPORT_DPI}dpi`;
+}
+
+function applyElementPositions() {
+  Object.entries(elementPositions).forEach(([key, pos]) => {
+    const el = document.getElementById(`el-${key}`);
+    if (el) { el.style.left = pos.left + "%"; el.style.top = pos.top + "%"; }
+  });
+}
+
+function makeDraggable(el, key) {
+  el.style.pointerEvents = "auto";
+  el.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    const artboard = document.getElementById("artboard");
+    const artRect = artboard.getBoundingClientRect();
+    const elRect = el.getBoundingClientRect();
+    const offsetX = e.clientX - elRect.left, offsetY = e.clientY - elRect.top;
+    el.setPointerCapture(e.pointerId);
+
+    function onMove(ev) {
+      let leftPx = ev.clientX - artRect.left - offsetX;
+      let topPx = ev.clientY - artRect.top - offsetY;
+      leftPx = Math.max(0, Math.min(leftPx, artRect.width - elRect.width));
+      topPx = Math.max(0, Math.min(topPx, artRect.height - elRect.height));
+      const leftPct = (leftPx / artRect.width) * 100, topPct = (topPx / artRect.height) * 100;
+      el.style.left = leftPct + "%"; el.style.top = topPct + "%";
+      elementPositions[key] = { left: leftPct, top: topPct };
+    }
+    function onUp() { el.releasePointerCapture(e.pointerId); el.removeEventListener("pointermove", onMove); el.removeEventListener("pointerup", onUp); }
+    el.addEventListener("pointermove", onMove);
+    el.addEventListener("pointerup", onUp);
+  });
+}
+
+function wirePageSetup() {
+  document.getElementById("paper-size-select").addEventListener("change", (e) => { currentPaper = e.target.value; updateArtboardSize(); });
+  document.querySelectorAll(".gds-orientation-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      currentOrientation = btn.dataset.orientation;
+      document.querySelectorAll(".gds-orientation-btn").forEach((b) => {
+        const active = b === btn;
+        b.classList.toggle("bg-sky-700", active); b.classList.toggle("text-white", active); b.classList.toggle("text-slate-500", !active);
+      });
+      updateArtboardSize();
+    });
+  });
+  document.querySelector('.gds-orientation-btn[data-orientation="portrait"]').classList.add("bg-sky-700", "text-white");
+  document.getElementById("reset-layout-btn").addEventListener("click", () => {
+    elementPositions = JSON.parse(JSON.stringify(DEFAULT_POSITIONS));
+    applyElementPositions();
+  });
+  window.addEventListener("resize", updateArtboardSize);
+}
+
+/* ---------------- Export: compose exactly the artboard region ---------------- */
+
+function roundRect(ctx, x, y, w, h, r, fill, stroke) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+  if (fill) ctx.fill(); if (stroke) ctx.stroke();
+}
+
+function composeExportCanvas() {
+  const mapContainer = document.getElementById("map");
+  const mapCanvas = map.getCanvas();
+  const mapRect = mapContainer.getBoundingClientRect();
+  const artboard = document.getElementById("artboard");
+  const artRect = artboard.getBoundingClientRect();
+  const dpr = mapCanvas.width / mapRect.width;
+
+  const sx = (artRect.left - mapRect.left) * dpr, sy = (artRect.top - mapRect.top) * dpr;
+  const sw = artRect.width * dpr, sh = artRect.height * dpr;
+
+  const { wIn, hIn } = currentPaperDims();
+  const outW = Math.round(wIn * EXPORT_DPI), outH = Math.round(hIn * EXPORT_DPI);
+
+  const out = document.createElement("canvas");
+  out.width = outW; out.height = outH;
+  const ctx = out.getContext("2d");
+  ctx.drawImage(mapCanvas, sx, sy, sw, sh, 0, 0, outW, outH);
+
+  drawTitleEl(ctx, outW, outH);
+  drawLegendEl(ctx, outW, outH);
+  if (currentTemplate.layers.studyArea && studyArea.loaded) drawStatsEl(ctx, outW, outH);
+  drawNorthArrowEl(ctx, outW, outH);
+
+  ctx.fillStyle = "rgba(255,255,255,0.85)";
+  ctx.fillRect(0, outH - 16, outW, 16);
+  ctx.fillStyle = "#64748b";
+  ctx.font = "9px sans-serif";
+  ctx.fillText("Basemap © OpenFreeMap / OpenMapTiles / OpenStreetMap contributors. Sample analysis layer is synthetic.", 8, outH - 5);
+
+  return out;
+}
+
+function drawTitleEl(ctx, outW, outH) {
+  const pos = elementPositions.title;
+  const x = (pos.left / 100) * outW, y = (pos.top / 100) * outH;
+  const w = Math.min(outW * 0.42, 320), h = outH * 0.06;
+  ctx.fillStyle = "rgba(255,255,255,0.95)"; ctx.strokeStyle = "#e2e8f0";
+  roundRect(ctx, x, y, w, h, 8, true, true);
+  ctx.fillStyle = "#0f172a"; ctx.font = `600 ${Math.round(h * 0.34)}px Georgia, serif`;
+  ctx.fillText(currentTemplate.name, x + 12, y + h * 0.42);
+  ctx.fillStyle = "#64748b"; ctx.font = `${Math.round(h * 0.2)}px sans-serif`;
+  ctx.fillText("GIS Design Studio · Geoinfotech Resources Limited", x + 12, y + h * 0.75);
+}
+
+function drawLegendEl(ctx, outW, outH) {
+  const pos = elementPositions.legend;
+  const x = (pos.left / 100) * outW, y = (pos.top / 100) * outH;
+  const w = Math.min(outW * 0.24, 210), pad = 12, rowH = 20;
+  const h = pad * 2 + rowH * currentTemplate.legend.length + 16;
+  ctx.fillStyle = "rgba(255,255,255,0.95)"; ctx.strokeStyle = "#e2e8f0";
+  roundRect(ctx, x, y, w, h, 10, true, true);
+  ctx.fillStyle = "#64748b"; ctx.font = "700 11px sans-serif";
+  ctx.fillText("LEGEND", x + pad, y + pad + 4);
+  currentTemplate.legend.forEach((item, i) => {
+    const ry = y + pad + 18 + i * rowH;
+    ctx.fillStyle = item.color; ctx.fillRect(x + pad, ry - 9, 10, 10);
+    ctx.fillStyle = "#334155"; ctx.font = "12px sans-serif";
+    ctx.fillText(item.label, x + pad + 16, ry);
+  });
+}
+
+function drawStatsEl(ctx, outW, outH) {
+  const pos = elementPositions.stats;
+  const x = (pos.left / 100) * outW, y = (pos.top / 100) * outH;
+  const w = Math.min(outW * 0.24, 210), pad = 12, h = 74;
+  ctx.fillStyle = "rgba(255,255,255,0.95)"; ctx.strokeStyle = "#e2e8f0";
+  roundRect(ctx, x, y, w, h, 10, true, true);
+  ctx.fillStyle = "#64748b"; ctx.font = "700 11px sans-serif";
+  ctx.fillText("STUDY AREA", x + pad, y + pad + 4);
+  ctx.fillStyle = "#0f172a"; ctx.font = "600 13px sans-serif";
+  ctx.fillText(studyArea.name || "—", x + pad, y + pad + 24);
+  ctx.fillStyle = "#64748b"; ctx.font = "11px sans-serif";
+  const areaText = studyArea.areaKm2 ? `≈ ${studyArea.areaKm2.toLocaleString(undefined, { maximumFractionDigits: 0 })} km² (approx.)` : "Area unavailable";
+  wrapText(ctx, areaText, x + pad, y + pad + 42, w - pad * 2, 13);
+}
+
+function wrapText(ctx, text, x, y, maxWidth, lineHeight) {
+  const words = text.split(" ");
+  let line = "", yy = y;
+  words.forEach((word) => {
+    const test = line + word + " ";
+    if (ctx.measureText(test).width > maxWidth && line !== "") { ctx.fillText(line, x, yy); line = word + " "; yy += lineHeight; }
+    else line = test;
+  });
+  ctx.fillText(line, x, yy);
+}
+
+function drawNorthArrowEl(ctx, outW, outH) {
+  const pos = elementPositions.northarrow;
+  const x = (pos.left / 100) * outW, y = (pos.top / 100) * outH;
+  const w = 100, h = 40;
+  ctx.fillStyle = "rgba(255,255,255,0.95)"; ctx.strokeStyle = "#e2e8f0";
+  roundRect(ctx, x, y, w, h, 10, true, true);
+  const naX = x + 20, naY = y + h / 2;
+  ctx.beginPath(); ctx.moveTo(naX, naY - 12); ctx.lineTo(naX + 7, naY + 6); ctx.lineTo(naX, naY); ctx.lineTo(naX - 7, naY + 6); ctx.closePath();
+  ctx.fillStyle = "#0f172a"; ctx.fill();
+  ctx.font = "10px sans-serif"; ctx.fillStyle = "#334155";
+  ctx.fillText(document.getElementById("scale-label").textContent, x + 36, y + h / 2 + 4);
+}
+
+function exportPNG() {
+  const canvas = composeExportCanvas();
+  const link = document.createElement("a");
+  link.download = `${currentTemplate.id}-map-export.png`;
+  link.href = canvas.toDataURL("image/png");
+  link.click();
+}
+
+function exportPDF() {
+  const canvas = composeExportCanvas();
+  const { jsPDF } = window.jspdf;
+  const orientation = canvas.width >= canvas.height ? "landscape" : "portrait";
+  const pdf = new jsPDF({ orientation, unit: "px", format: [canvas.width, canvas.height] });
+  pdf.addImage(canvas.toDataURL("image/png"), "PNG", 0, 0, canvas.width, canvas.height);
+  pdf.save(`${currentTemplate.id}-map-export.pdf`);
+}
+
+/* ---------------- Boot ---------------- */
+document.addEventListener("DOMContentLoaded", () => {
+  renderTemplateList();
+  renderLayerList();
+  wireBasemapSwitcher();
+  wireStudyAreaForm();
+  wirePageSetup();
+  initMap();
+  updateArtboardSize();
+  applyElementPositions();
+  ["title", "legend", "stats", "northarrow"].forEach((key) => makeDraggable(document.getElementById(`el-${key}`), key));
+
+  document.getElementById("export-png-btn").addEventListener("click", exportPNG);
+  document.getElementById("export-pdf-btn").addEventListener("click", exportPDF);
+  document.getElementById("save-template-btn").addEventListener("click", () => {
+    alert("In a full build, this would save the current map view, styling, layout and layer selection as a new reusable template.");
+  });
+
+  const enterEditor = (templateId) => {
+    document.getElementById("create-modal").classList.remove("is-open");
+    const landing = document.getElementById("landing");
+    landing.classList.add("is-hidden");
+    if (templateId) {
+      const template = TEMPLATES.find((item) => item.id === templateId);
+      if (template) applyTemplate(template);
+    }
+    setTimeout(() => { map.resize(); updateArtboardSize(); }, 30);
+  };
+  const createModal = document.getElementById("create-modal");
+  const openCreate = () => createModal.classList.add("is-open");
+  document.getElementById("open-create").addEventListener("click", openCreate);
+  document.getElementById("quick-custom").addEventListener("click", openCreate);
+  document.getElementById("browse-templates").addEventListener("click", openCreate);
+  document.querySelectorAll(".template-filter").forEach((filterButton) => filterButton.addEventListener("click", () => {
+    document.querySelectorAll(".template-filter").forEach((button) => button.classList.remove("is-active"));
+    filterButton.classList.add("is-active");
+    const category = filterButton.dataset.filter;
+    document.querySelectorAll(".style-card").forEach((card) => {
+      const categories = (card.dataset.category || "").split(" ");
+      card.classList.toggle("is-filtered", category !== "all" && !categories.includes(category));
+    });
+  }));
+  document.getElementById("create-close").addEventListener("click", () => createModal.classList.remove("is-open"));
+  createModal.addEventListener("click", (event) => { if (event.target === createModal) createModal.classList.remove("is-open"); });
+  document.addEventListener("keydown", (event) => { if (event.key === "Escape") createModal.classList.remove("is-open"); });
+  document.querySelectorAll("[data-enter-editor]").forEach((button) => button.addEventListener("click", () => enterEditor()));
+  document.querySelectorAll("[data-template]").forEach((button) => button.addEventListener("click", () => enterEditor(button.dataset.template)));
+  document.getElementById("home-search-form").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const query = document.getElementById("home-search-input").value.trim().toLowerCase();
+    const match = TEMPLATES.find((template) => `${template.name} ${template.desc}`.toLowerCase().includes(query));
+    enterEditor(match?.id || "site");
+  });
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,246 @@
+/* ==================================================================
+   Template thumbnails — pure CSS cartographic art, no images.
+   Class is .pv-<templateId>; shared furniture is layered on top by
+   src/ui/landing.js (neatline, north arrow, scale bar, inset, grid).
+   ================================================================== */
+
+.pv { position: relative; overflow: hidden; isolation: isolate; background: #e2e8f0; border-radius: 13px; }
+.pv::after { content: ''; position: absolute; inset: 0; pointer-events: none; }
+.showcase-card .pv { height: 168px; }
+.tpl-card .pv { height: 100%; border-radius: 0; }
+
+/* Shared map furniture ------------------------------------------- */
+.pv-label {
+  position: absolute; z-index: 5; left: 10px; top: 10px; border-radius: 999px;
+  padding: 4px 8px; background: rgba(255, 255, 255, 0.9); color: var(--ink);
+  font-size: 9px; font-weight: 800; letter-spacing: 0.05em; text-transform: uppercase;
+}
+.pv-neatline {
+  position: absolute; z-index: 4; inset: 8px; border: 1px solid rgba(15, 23, 42, 0.7);
+  box-shadow: inset 0 0 0 3px rgba(255, 255, 255, 0.5); pointer-events: none;
+}
+.pv-neatline::before {
+  content: attr(data-title); position: absolute; left: 6px; right: 6px; bottom: 6px;
+  padding: 4px 6px; background: rgba(255, 255, 255, 0.9); border-top: 2px solid var(--ink);
+  color: var(--ink); font: 700 8.5px 'Source Sans 3', sans-serif;
+  letter-spacing: 0.04em; text-transform: uppercase;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.pv-north {
+  position: absolute; z-index: 5; right: 8px; top: 8px; width: 27px; height: 27px;
+  border-radius: 50%; display: grid; place-items: center;
+  background: rgba(255, 255, 255, 0.9); color: var(--ink); font-size: 8.5px; font-weight: 800;
+}
+.pv-scale {
+  position: absolute; z-index: 5; right: 17px; bottom: 22px; width: 46px; height: 5px;
+  border-left: 1px solid var(--ink); border-right: 1px solid var(--ink); border-bottom: 2px solid var(--ink);
+}
+.pv-inset {
+  position: absolute; z-index: 5; right: 17px; top: 46px; width: 46px; height: 36px;
+  border: 2px solid rgba(255, 255, 255, 0.95); outline: 1px solid #334155;
+  background: radial-gradient(circle at 58% 50%, #ef4444 0 2px, transparent 3px), linear-gradient(145deg, #dbeafe, #bbf7d0);
+}
+.pv-grid {
+  position: absolute; z-index: 3; inset: 9px; pointer-events: none;
+  background:
+    repeating-linear-gradient(0deg, transparent 0 28px, rgba(15, 23, 42, 0.16) 29px 30px),
+    repeating-linear-gradient(90deg, transparent 0 38px, rgba(15, 23, 42, 0.16) 39px 40px);
+}
+.pv-coords {
+  position: absolute; z-index: 6; left: 13px; bottom: 24px; padding: 2px 4px;
+  background: rgba(255, 255, 255, 0.78); color: var(--ink); font-size: 7px; font-weight: 700;
+}
+
+/* CARTOGRAPHIC ---------------------------------------------------- */
+.pv-quiet-canvas {
+  background:
+    linear-gradient(102deg, transparent 48%, #7dd3fc 49% 53%, transparent 54%),
+    repeating-linear-gradient(35deg, transparent 0 27px, rgba(71, 85, 105, 0.12) 28px 30px),
+    #e9ece9;
+}
+.pv-quiet-canvas::after {
+  inset: 25% 20%; border: 3px solid #0f766e; background: rgba(20, 184, 166, 0.16);
+  box-shadow: 0 0 0 999px rgba(255, 255, 255, 0.12);
+}
+.pv-district-atlas {
+  background:
+    linear-gradient(118deg, transparent 0 46%, rgba(56, 189, 248, 0.62) 47% 49%, transparent 50%),
+    radial-gradient(circle at 64% 38%, #ef4444 0 2px, transparent 3px),
+    repeating-linear-gradient(24deg, transparent 0 22px, rgba(190, 24, 93, 0.17) 23px 25px),
+    #e9e5c9;
+}
+.pv-district-atlas::after {
+  background:
+    radial-gradient(ellipse at 70% 65%, rgba(22, 163, 74, 0.36), transparent 34%),
+    repeating-linear-gradient(90deg, transparent 0 31px, rgba(51, 65, 85, 0.12) 32px 33px);
+}
+
+/* REPORT ----------------------------------------------------------- */
+.pv-field-report { background: repeating-linear-gradient(12deg, #e7e1d3 0 15px, #d6cebc 16px 17px); }
+.pv-field-report::after {
+  inset: 20% 14%; border: 4px double #172554;
+  background: repeating-linear-gradient(45deg, rgba(23, 37, 84, 0.13) 0 3px, transparent 3px 8px);
+}
+.pv-dark-dashboard { background: #0b1b28; }
+.pv-dark-dashboard::before {
+  content: 'NATIONAL ENVIRONMENT PROFILE'; position: absolute; z-index: 3; left: 12px; top: 15px;
+  color: #e2e8f0; font: 800 10px 'Source Sans 3', sans-serif; letter-spacing: 0.08em;
+}
+.pv-dark-dashboard::after {
+  left: 11px; right: 36%; top: 42px; bottom: 12px; border: 1px solid #94a3b8;
+  background: radial-gradient(ellipse at 46% 48%, #365314 0 34%, #1f3b14 35% 48%, transparent 49%);
+}
+
+/* ARTISTIC --------------------------------------------------------- */
+.pv-luminous-risk {
+  background:
+    radial-gradient(circle at 58% 45%, #38bdf8 0 3px, transparent 4px),
+    radial-gradient(circle at 35% 65%, #fbbf24 0 3px, transparent 4px),
+    radial-gradient(circle at 72% 30%, #fb7185 0 4px, transparent 5px),
+    linear-gradient(135deg, #061827, #172c38);
+}
+.pv-luminous-risk::after {
+  background:
+    radial-gradient(circle at 58% 45%, rgba(56, 189, 248, 0.7), transparent 9%),
+    radial-gradient(circle at 35% 65%, rgba(251, 191, 36, 0.6), transparent 8%),
+    radial-gradient(circle at 72% 30%, rgba(251, 113, 133, 0.7), transparent 9%),
+    repeating-linear-gradient(28deg, transparent 0 33px, rgba(148, 163, 184, 0.12) 34px 35px);
+}
+.pv-watercolour {
+  background:
+    linear-gradient(25deg, transparent 35%, rgba(2, 132, 199, 0.34) 36% 42%, transparent 43%),
+    radial-gradient(ellipse at 25% 40%, rgba(74, 222, 128, 0.42), transparent 30%),
+    radial-gradient(ellipse at 74% 65%, rgba(250, 204, 21, 0.33), transparent 28%),
+    #f7f1df;
+}
+.pv-watercolour::after {
+  background: repeating-radial-gradient(circle at 20% 20%, rgba(71, 85, 105, 0.07) 0 1px, transparent 1px 4px);
+  mix-blend-mode: multiply;
+}
+
+/* VINTAGE ---------------------------------------------------------- */
+.pv-naturalist-atlas {
+  background:
+    radial-gradient(ellipse at 54% 48%, transparent 0 23%, #7c5f3b 24% 25%, transparent 26% 36%, #947451 37% 38%, transparent 39%),
+    #e7d7b5;
+  filter: sepia(0.22);
+}
+.pv-naturalist-atlas::after {
+  background: repeating-radial-gradient(circle at 20% 20%, rgba(78, 52, 29, 0.11) 0 1px, transparent 1px 4px);
+  mix-blend-mode: multiply;
+}
+.pv-heritage-sepia {
+  background:
+    linear-gradient(96deg, transparent 40%, rgba(120, 83, 44, 0.35) 41% 45%, transparent 46%),
+    repeating-linear-gradient(0deg, rgba(120, 83, 44, 0.08) 0 1px, transparent 1px 11px),
+    radial-gradient(ellipse at 60% 55%, #d9c49b 0 30%, #c9b083 31% 55%, transparent 56%),
+    #efe2c4;
+  filter: sepia(0.45) contrast(1.05);
+}
+.pv-heritage-sepia::after {
+  background: radial-gradient(ellipse at 50% 50%, transparent 45%, rgba(78, 52, 29, 0.3) 100%);
+}
+
+/* TOPOGRAPHIC ------------------------------------------------------ */
+.pv-relief-habitat {
+  background:
+    radial-gradient(ellipse at 35% 50%, transparent 0 12%, #94a3b8 13% 14%, transparent 15% 23%, #64748b 24% 25%, transparent 26% 34%, #475569 35% 36%, transparent 37%),
+    #d9e4d5;
+}
+.pv-relief-habitat::after {
+  background: repeating-linear-gradient(115deg, transparent 0 13px, rgba(15, 23, 42, 0.14) 14px 15px);
+  mix-blend-mode: multiply;
+}
+.pv-elevation-poster {
+  background:
+    radial-gradient(ellipse at 66% 52%, #f8fafc 0 6%, #7f1d1d 7% 16%, #ea580c 17% 23%, #facc15 24% 30%, #16a34a 31% 43%, #86efac 44% 55%, transparent 56%),
+    #bce7ee;
+}
+.pv-elevation-poster::after {
+  background: repeating-radial-gradient(ellipse at 66% 52%, transparent 0 10px, rgba(15, 23, 42, 0.15) 11px 12px);
+}
+.pv-highland-story {
+  background:
+    radial-gradient(ellipse at 58% 56%, #f5f5dc 0 10%, #a3b18a 11% 28%, #588157 29% 42%, #dad7cd 43% 55%, transparent 56%),
+    #eee9d7;
+}
+.pv-highland-story::before {
+  content: ''; position: absolute; z-index: 3; left: 9px; top: 34px; width: 33%; height: 104px;
+  background: repeating-linear-gradient(0deg, #57534e 0 1px, transparent 1px 9px); opacity: 0.55;
+}
+.pv-highland-story::after {
+  background: repeating-radial-gradient(ellipse at 58% 56%, transparent 0 12px, rgba(68, 64, 60, 0.25) 13px 14px);
+}
+
+/* 3D --------------------------------------------------------------- */
+.pv-terrain-3d {
+  background:
+    linear-gradient(145deg, transparent 0 42%, rgba(15, 118, 110, 0.35) 43% 48%, transparent 49%),
+    radial-gradient(ellipse at 52% 95%, #14532d 0 8%, #4d7c0f 9% 19%, #84cc16 20% 31%, #bef264 32% 44%, #d9f99d 45% 55%, #e0f2fe 56%);
+}
+.pv-terrain-3d::after { background: linear-gradient(160deg, rgba(255, 255, 255, 0.45), transparent 40%, rgba(15, 23, 42, 0.2)); }
+.pv-city-3d { background: linear-gradient(180deg, #dbeafe 0 34%, #eef2f6 35%); }
+.pv-city-3d::before {
+  content: ''; position: absolute; z-index: 3; inset: 34% 8% 12%;
+  background:
+    linear-gradient(90deg, transparent 0 6%, #94a3b8 6% 14%, transparent 14% 20%, #64748b 20% 31%, transparent 31% 38%, #475569 38% 47%, transparent 47% 54%, #94a3b8 54% 66%, transparent 66% 72%, #64748b 72% 83%, transparent 83%);
+  clip-path: polygon(0 42%, 8% 42%, 8% 8%, 22% 8%, 22% 52%, 36% 52%, 36% 20%, 52% 20%, 52% 62%, 68% 62%, 68% 0, 84% 0, 84% 46%, 100% 46%, 100% 100%, 0 100%);
+}
+.pv-city-3d::after {
+  background: linear-gradient(115deg, rgba(255, 255, 255, 0.4), transparent 42%, rgba(15, 23, 42, 0.24));
+}
+
+/* ANALYSIS --------------------------------------------------------- */
+.pv-land-cover { background: linear-gradient(90deg, #d1fae5 0 33%, #fef3c7 33% 66%, #dbeafe 66%); }
+.pv-land-cover::after {
+  background:
+    repeating-linear-gradient(45deg, transparent 0 8px, rgba(15, 118, 110, 0.28) 8px 10px),
+    repeating-linear-gradient(135deg, transparent 0 14px, rgba(3, 105, 161, 0.2) 14px 16px);
+}
+.pv-indicator-poster {
+  background:
+    linear-gradient(90deg, #eef2f1 0 27%, transparent 27% 78%, #f8fafc 78%),
+    radial-gradient(ellipse at 56% 53%, #14532d 0 24%, #0f766e 25% 38%, #cbd5e1 39% 49%, transparent 50%),
+    #f8fafc;
+}
+.pv-indicator-poster::before {
+  content: ''; position: absolute; z-index: 3; left: 11px; top: 36px; width: 20%; height: 88px;
+  background: repeating-linear-gradient(0deg, #64748b 0 2px, transparent 2px 12px); opacity: 0.45;
+}
+.pv-indicator-poster::after {
+  right: 9px; left: auto; top: 46px; width: 15%; height: 72px;
+  background: linear-gradient(0deg, #0f766e 0 30%, transparent 30% 38%, #94a3b8 38% 62%, transparent 62% 70%, #d6b56b 70%);
+}
+.pv-oil-spill {
+  background:
+    radial-gradient(ellipse at 46% 52%, rgba(24, 24, 27, 0.92) 0 14%, rgba(63, 63, 70, 0.75) 15% 26%, rgba(120, 113, 108, 0.4) 27% 37%, transparent 38%),
+    linear-gradient(160deg, #0c4a6e 0 40%, #075985 41% 70%, #0e7490 71%);
+}
+.pv-oil-spill::after {
+  background:
+    radial-gradient(ellipse at 46% 52%, transparent 0 36%, rgba(251, 191, 36, 0.55) 37% 39%, transparent 40%),
+    repeating-linear-gradient(70deg, transparent 0 18px, rgba(148, 163, 184, 0.12) 19px 20px);
+}
+
+/* EDITORIAL -------------------------------------------------------- */
+.pv-climate-bulletin { background: #e8d7b8; }
+.pv-climate-bulletin::before {
+  content: 'CLIMATE BRIEF'; position: absolute; z-index: 3; left: 8px; right: 8px; top: 25px;
+  border-top: 3px double #292524; border-bottom: 3px double #292524; padding: 7px 0;
+  color: #292524; text-align: center; font: 900 15px Georgia, serif; letter-spacing: 0.08em;
+}
+.pv-climate-bulletin::after {
+  inset: 74px 12px 12px 33%; border: 1px solid #292524;
+  background:
+    radial-gradient(ellipse at 50% 50%, transparent 0 22%, #78716c 23% 24%, transparent 25%),
+    repeating-linear-gradient(90deg, transparent 0 21px, rgba(41, 37, 36, 0.12) 22px 23px);
+}
+
+/* BLANK ------------------------------------------------------------ */
+.pv-blank {
+  background:
+    repeating-linear-gradient(45deg, #f8fafc 0 9px, #eef2f6 9px 18px);
+}
+.pv-blank::after {
+  inset: 22%; border: 2px dashed #94a3b8; border-radius: 10px;
+}

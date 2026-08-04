@@ -1,0 +1,29 @@
+{
+  "name": "gis-design-studio",
+  "version": "3.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Template-based map design studio — Canva-style cartography with OSM data and Earth Engine analysis",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@tmcw/togeojson": "^5.8.1",
+    "@turf/area": "^7.1.0",
+    "@turf/bbox": "^7.1.0",
+    "@turf/buffer": "^7.1.0",
+    "@turf/centroid": "^7.1.0",
+    "jspdf": "^2.5.2",
+    "maplibre-gl": "^4.7.1",
+    "osmtogeojson": "^3.0.0-beta.5",
+    "shpjs": "^6.1.0"
+  },
+  "devDependencies": {
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.17",
+    "vite": "^6.0.7"
+  }
+}

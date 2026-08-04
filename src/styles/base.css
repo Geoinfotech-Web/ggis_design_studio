@@ -1,0 +1,123 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ------------------------------------------------------------------
+   Design tokens — carried over from the Flood Watch / nigeria-flood
+   design system: sky + slate, glass surfaces, Source Sans 3 + Fraunces.
+   ------------------------------------------------------------------ */
+:root {
+  --ink: #0f172a;
+  --ink-soft: #475569;
+  --ink-faint: #94a3b8;
+  --river: #0369a1;
+  --river-deep: #075985;
+  --river-light: #38bdf8;
+  --mist: #e0f2fe;
+  --line: #e2e8f0;
+  --line-soft: #f1f5f9;
+  --surface: #ffffff;
+  --canvas: #f8fafc;
+  --leaf: #0f766e;
+  --ember: #ea580c;
+
+  --radius-sm: 8px;
+  --radius: 12px;
+  --radius-lg: 18px;
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.05);
+  --shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+  --shadow-lg: 0 24px 60px rgba(15, 23, 42, 0.18);
+
+  --header-h: 52px;
+  --rail-w: 74px;
+  --panel-w: 288px;
+}
+
+@layer base {
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: 'Source Sans 3', ui-sans-serif, system-ui, sans-serif;
+    background: var(--canvas);
+    color: var(--ink);
+    overflow: hidden;
+  }
+  .font-display { font-family: 'Fraunces', Georgia, serif; }
+  .font-mono { font-family: 'IBM Plex Mono', ui-monospace, monospace; }
+
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+  [hidden], .is-hidden { display: none !important; }
+}
+
+@layer components {
+  .btn-primary {
+    @apply rounded-lg bg-sky-700 px-3 py-1.5 text-[12px] font-semibold text-white transition hover:bg-sky-800 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-ghost {
+    @apply rounded-lg border border-slate-300 px-3 py-1.5 text-[12px] font-semibold text-slate-600 transition hover:border-slate-400 hover:text-slate-800 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-soft {
+    @apply rounded-lg bg-sky-50 px-3 py-1.5 text-[12px] font-semibold text-sky-800 transition hover:bg-sky-100;
+  }
+  .icon-btn {
+    @apply grid h-8 w-8 place-items-center rounded-lg border border-transparent text-[15px] text-slate-500 transition hover:border-slate-200 hover:bg-slate-50 hover:text-slate-800 disabled:opacity-35 disabled:hover:border-transparent disabled:hover:bg-transparent;
+  }
+  .field {
+    @apply w-full rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-[12px] text-slate-800 outline-none transition focus:border-sky-300 focus:bg-white focus:ring-2 focus:ring-sky-100;
+  }
+  .field-label {
+    @apply mb-1 block text-[11px] font-semibold text-slate-500;
+  }
+  .panel-title {
+    @apply text-[11px] font-extrabold uppercase tracking-[0.09em] text-slate-500;
+  }
+  .card {
+    @apply rounded-xl border border-slate-200 bg-white;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-bold text-slate-600;
+  }
+}
+
+/* Toasts ---------------------------------------------------------- */
+.toast-stack {
+  position: fixed; right: 16px; bottom: 16px; z-index: 400;
+  display: flex; flex-direction: column; gap: 8px; pointer-events: none;
+}
+.toast {
+  pointer-events: auto;
+  min-width: 240px; max-width: 380px;
+  border-radius: var(--radius); padding: 10px 14px;
+  background: #0f172a; color: #f8fafc;
+  font-size: 12.5px; line-height: 1.4;
+  box-shadow: var(--shadow);
+  display: flex; gap: 9px; align-items: flex-start;
+  animation: toast-in 0.18s ease-out;
+}
+.toast--ok    { background: #0f766e; }
+.toast--warn  { background: #b45309; }
+.toast--error { background: #b91c1c; }
+.toast--busy  { background: #075985; }
+.toast b { font-weight: 700; }
+@keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+/* Spinner --------------------------------------------------------- */
+.spinner {
+  width: 13px; height: 13px; flex: none; border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.35); border-top-color: #fff;
+  animation: spin 0.7s linear infinite;
+}
+.spinner--ink { border-color: rgba(15, 23, 42, 0.18); border-top-color: var(--river); }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* MapLibre tweaks ------------------------------------------------- */
+.maplibregl-ctrl-group {
+  border-radius: 10px !important;
+  overflow: hidden;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.14) !important;
+}
+.maplibregl-ctrl-attrib { font-size: 10px !important; }
+.maplibregl-ctrl-bottom-right { z-index: 5; }
