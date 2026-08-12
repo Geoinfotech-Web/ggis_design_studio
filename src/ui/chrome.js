@@ -8,13 +8,14 @@
  */
 
 import { $, $$, el, fill, debounce } from '../core/dom.js';
-import { state, set, subscribe, undo, redo, canUndo, canRedo, saveProject } from '../core/store.js';
+import { state, set, subscribe, undo, redo, canUndo, canRedo, saveProject, hasWork } from '../core/store.js';
 import { notify } from '../core/toast.js';
 import { APP, BASEMAPS, ATTRIBUTION_TEXT } from '../core/constants.js';
 import { setBasemap, flyToBounds, getMap, resizeSoon } from '../core/map.js';
 import { boundsFromBbox, formatArea } from '../core/geo.js';
-import { exportPng, exportPdf } from '../export/render.js';
+import { exportPng, exportPdf, thumbnailDataUrl } from '../export/render.js';
 import { setTool } from './tool.js';
+import { themeToggle } from './theme.js';
 import { renderElements, layoutArtboard, paperDims } from './artboard.js';
 
 /* ------------------------------------------------------------------ */
@@ -25,9 +26,34 @@ const TOOLS = [
   { id: 'area',      icon: '◎', label: 'Area' },
   { id: 'data',      icon: '≣', label: 'Data' },
   { id: 'analysis',  icon: '◐', label: 'Analysis' },
+  { id: 'ai',        icon: '✧', label: 'Assistant' },
   { id: 'elements',  icon: '✥', label: 'Elements' },
   { id: 'layers',    icon: '❒', label: 'Layers' },
 ];
+
+/* ------------------------------------------------------------------ */
+/* narrow-screen sheets                                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Below this width the panels stop being columns and become sheets over the
+ * map, so they need opening and closing — something the wide layout never
+ * has to think about. The breakpoint is duplicated in studio.css; it is the
+ * one number the two have to agree on.
+ */
+const narrow = () => window.matchMedia('(max-width: 760px)').matches;
+
+const studioEl = () => $('#studio');
+
+function setPanelOpen(open) {
+  studioEl()?.classList.toggle('is-panel-open', open);
+  resizeSoon();
+}
+
+function setInspectorOpen(open) {
+  studioEl()?.classList.toggle('is-inspector-open', open);
+  resizeSoon();
+}
 
 function renderRail() {
   const rail = $('#tool-rail');
@@ -37,8 +63,18 @@ function renderRail() {
       el('span.rail-ico', { text: tool.icon }),
       el('span', { text: tool.label }),
     ]);
-    btn.classList.toggle('is-active', state.activeTool === tool.id);
-    btn.addEventListener('click', () => setTool(tool.id));
+    const active = state.activeTool === tool.id;
+    btn.classList.toggle('is-active', active);
+    btn.addEventListener('click', () => {
+      // On a phone the rail doubles as the panel's open/close control:
+      // tapping the tool you are already in puts the map back.
+      if (narrow() && active) {
+        setPanelOpen(!studioEl()?.classList.contains('is-panel-open'));
+        return;
+      }
+      setTool(tool.id);
+      if (narrow()) setPanelOpen(true);
+    });
     return btn;
   }));
 }
@@ -55,7 +91,7 @@ function showPane() {
 const STEPS = [
   { id: 'templates', label: 'Style',    done: () => Boolean(state.templateId) },
   { id: 'area',      label: 'Area',     done: () => Boolean(state.studyArea) },
-  { id: 'data',      label: 'Data',     done: () => state.layers.some((l) => l.source === 'osm' || l.source === 'upload') },
+  { id: 'data',      label: 'Data',     done: () => state.layers.some((l) => l.source === 'osm' || l.source === 'overture' || l.source === 'upload') },
   { id: 'analysis',  label: 'Analysis', done: () => state.analysisRuns.length > 0 },
   { id: 'elements',  label: 'Design',   done: () => state.elements.length > 0 },
 ];
@@ -161,11 +197,35 @@ async function runExport(kind) {
   }
 }
 
+/** Save into the project library, with a thumbnail for the home page. */
+async function saveNow() {
+  const status = notify.busy('Saving…');
+  let thumbnail;
+  try {
+    if (state.elements.length) thumbnail = await thumbnailDataUrl();
+  } catch { /* a project without a picture still saves */ }
+
+  const result = saveProject({ thumbnail });
+  if (result.ok) status.update(`<b>${state.projectName}</b> saved to your projects.`, { tone: 'ok', duration: 3500 });
+  else status.update(result.error, { tone: 'error', duration: 9000 });
+  return result;
+}
+
 function initHeader(onHome) {
   const name = $('#project-name');
   if (name) {
     name.value = state.projectName;
     name.addEventListener('input', () => set({ projectName: name.value }, { history: false }));
+  }
+
+  // A visible Save sits next to undo/redo so the project library is
+  // discoverable; autosave and Ctrl+S write to the same place.
+  const undoBtn = $('#undo-btn');
+  if (undoBtn && !$('#save-btn')) {
+    const save = el('button.icon-btn#save-btn', { type: 'button', title: 'Save to your projects (Ctrl+S)', 'aria-label': 'Save project', text: '⤓' });
+    save.addEventListener('click', saveNow);
+    undoBtn.before(save);
+    undoBtn.before(themeToggle());
   }
 
   $('#back-home')?.addEventListener('click', onHome);
@@ -181,7 +241,7 @@ function initHeader(onHome) {
     const key = event.key.toLowerCase();
     if (key === 'z' && !event.shiftKey) { event.preventDefault(); if (undo()) { renderElements(); layoutArtboard(); } }
     else if ((key === 'z' && event.shiftKey) || key === 'y') { event.preventDefault(); if (redo()) { renderElements(); layoutArtboard(); } }
-    else if (key === 's') { event.preventDefault(); saveProject() && notify.ok('Project saved in this browser.'); }
+    else if (key === 's') { event.preventDefault(); saveNow(); }
     else if (key === 'e') { event.preventDefault(); runExport('pdf'); }
   });
 }
@@ -200,6 +260,29 @@ export function initChrome({ onHome }) {
 
   subscribe(['activeTool'], () => { renderRail(); showPane(); renderSteps(); resizeSoon(); });
   subscribe(['basemap'], renderMapControls);
+
+  // On a narrow screen the inspector is a sheet, so it has to be summoned by
+  // the thing it inspects and dismissed when nothing is selected.
+  subscribe(['selectedElementId', 'selectedLayerId'], () => {
+    if (!narrow()) return;
+    const selected = Boolean(state.selectedElementId || state.selectedLayerId);
+    if (selected) setPanelOpen(false);
+    setInspectorOpen(selected);
+  });
+
+  // Touching the map is how you get back to the map.
+  $('#canvas-wrap')?.addEventListener('pointerdown', () => {
+    if (!narrow()) return;
+    setPanelOpen(false);
+    setInspectorOpen(false);
+  }, { capture: true });
+
+  // Coming back to a wide window must not leave a sheet class behind.
+  window.matchMedia('(max-width: 760px)').addEventListener('change', (e) => {
+    if (e.matches) return;
+    studioEl()?.classList.remove('is-panel-open', 'is-inspector-open');
+    resizeSoon();
+  });
   subscribe(['studyArea', 'layers', 'analysisRuns', 'elements', 'templateId', 'page'], () => {
     renderSteps();
     renderFooter();
@@ -207,7 +290,9 @@ export function initChrome({ onHome }) {
   });
   subscribe(['history'], renderHeader);
 
-  // Autosave — a refresh should never lose a design.
-  const save = debounce(() => saveProject(), 900);
+  // Autosave — a refresh should never lose a design. It deliberately does
+  // not *create* a project until there is something worth keeping, or
+  // browsing the template gallery would litter the home page with stubs.
+  const save = debounce(() => { if (hasWork()) saveProject(); }, 900);
   subscribe(['elements', 'page', 'layers', 'studyArea', 'templateId', 'mapLook', 'basemap', 'mapView', 'projectName', 'terrain', 'buildings3d'], save);
 }

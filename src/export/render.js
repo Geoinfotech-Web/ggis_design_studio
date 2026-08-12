@@ -11,13 +11,10 @@
 
 import { state } from '../core/store.js';
 import { getMap, lookFilter } from '../core/map.js';
-import { APP } from '../core/constants.js';
+import { APP, effectiveDpi } from '../core/constants.js';
 import { buildRenderContext } from '../layout/derive.js';
 import { paintElement, preloadElementAssets } from '../layout/elements.js';
 import { paperDims, artboardRect } from '../ui/artboard.js';
-
-/** Refuse absurd canvases rather than crashing the tab. */
-const MAX_PIXELS = 48e6;
 
 /** Wait for the map to finish drawing, but never hang the export. */
 function mapIdle(timeout = 2500) {
@@ -113,13 +110,12 @@ export async function composeExport(opts = {}) {
   const dpi = opts.dpi ?? state.page.dpi ?? 150;
   const { wIn, hIn } = paperDims();
 
-  let W = Math.round(wIn * dpi);
-  let H = Math.round(hIn * dpi);
-  if (W * H > MAX_PIXELS) {
-    const k = Math.sqrt(MAX_PIXELS / (W * H));
-    W = Math.round(W * k);
-    H = Math.round(H * k);
-  }
+  // Large-format paper hits this routinely — A0 at 300 dpi is 139 megapixels
+  // — so the cap is shared with the page setup panel, which shows the
+  // resolution the export will really achieve before you ask for it.
+  const real = effectiveDpi(wIn, hIn, dpi);
+  const W = Math.round(wIn * real);
+  const H = Math.round(hIn * real);
 
   opts.onProgress?.('Waiting for the map to finish drawing…');
   await Promise.all([mapIdle(), document.fonts?.ready ?? Promise.resolve(), preloadElementAssets(state.elements)]);
