@@ -21,6 +21,8 @@ import {
   rgba, roundRect, paintChrome, setFont, drawParagraph, drawLine, drawSwatch,
 } from './paint.js';
 import { legendRows, statsRows, metadataRows, creditsText, scaleBarFor } from './derive.js';
+import { iconSvg } from '../layers/icons.js';
+import { dashArray, isTransparent } from '../layers/symbology.js';
 
 /* ------------------------------------------------------------------ */
 /* shared style presets                                                */
@@ -65,16 +67,74 @@ function chromeDom(node, style, u) {
   });
 }
 
-/** Swatch markup for the on-screen legend. */
-function swatchHtml(kind, color, px) {
+/**
+ * Swatch markup for the on-screen legend — the twin of drawSwatch() in
+ * paint.js. A row that carries an icon or a line pattern shows it, so the
+ * legend key is the same mark the map draws.
+ */
+function swatchHtml(kind, color, px, mark = {}) {
+  // Nothing is drawn, so the key shows an empty outline — the same way a
+  // legend has always said "boundary only, no fill".
+  if (isTransparent(color)) {
+    const w = kind === 'line' ? px : px;
+    const h = kind === 'line' ? Math.max(2, px * 0.5) : px * 0.84;
+    const radius = kind === 'point' ? '50%' : `${px * 0.18}px`;
+    return `<i style="display:block;width:${w}px;height:${h}px;flex:none;border:1px solid currentColor;border-radius:${radius};opacity:.55;background:transparent"></i>`;
+  }
+
+  if (kind === 'point' && mark.icon) {
+    const svg = iconSvg(mark.icon, color, px);
+    if (svg) return svg;
+  }
   if (kind === 'line') {
-    return `<i style="display:block;width:${px}px;height:${Math.max(1.2, px * 0.26)}px;border-radius:99px;background:${color};flex:none"></i>`;
+    const h = Math.max(1.2, px * 0.26);
+    const pattern = dashArray(mark.dash);
+    if (pattern) {
+      // A repeating gradient reproduces the dasharray without an SVG, in the
+      // same on/off proportions the map uses — including patterns with more
+      // than one dash in them, like dash-dot.
+      const stops = [];
+      let at = 0;
+      pattern.forEach((seg, i) => {
+        const end = at + seg * h;
+        stops.push(`${i % 2 ? 'transparent' : color} ${at}px ${end}px`);
+        at = end;
+      });
+      return `<i style="display:block;width:${px}px;height:${h}px;flex:none;background:repeating-linear-gradient(90deg,${stops.join(',')})"></i>`;
+    }
+    return `<i style="display:block;width:${px}px;height:${h}px;border-radius:99px;background:${color};flex:none"></i>`;
   }
   if (kind === 'point') {
     return `<i style="display:block;width:${px * 0.78}px;height:${px * 0.78}px;border-radius:50%;background:${color};box-shadow:0 0 0 ${Math.max(0.6, px * 0.1)}px #fff;flex:none;margin:0 ${px * 0.11}px"></i>`;
   }
   return `<i style="display:block;width:${px}px;height:${px * 0.84}px;border-radius:${px * 0.18}px;background:${color};flex:none"></i>`;
 }
+
+/**
+ * Collapse a run of `swatch: 'ramp'` rows into a single gradient entry.
+ * A continuous index (NDVI, temperature) then prints as a colour bar with
+ * end labels instead of a stack of near-identical squares.
+ */
+function groupLegendRows(rows) {
+  const out = [];
+  for (const row of rows) {
+    const last = out[out.length - 1];
+    if (row.swatch === 'ramp' && last?.kind === 'ramp') {
+      last.colors.push(row.color);
+      last.labels.push(row.label);
+    } else if (row.swatch === 'ramp') {
+      out.push({ kind: 'ramp', colors: [row.color], labels: [row.label] });
+    } else {
+      out.push({ kind: 'item', ...row });
+    }
+  }
+  return out;
+}
+
+const rampEnds = (labels) => {
+  const named = labels.filter(Boolean);
+  return [named[0] ?? '', named.length > 1 ? named[named.length - 1] : ''];
+};
 
 /** Rows of {label, value} as a two-column DOM block. */
 function rowsHtml(rows, u, style, { valueAlign = 'right' } = {}) {
@@ -193,6 +253,108 @@ function paintNorthGlyph(c, variant, color, cx, cy, side, rotation) {
 }
 
 /* ------------------------------------------------------------------ */
+/* shapes — one geometry description, two renderers                    */
+/* ------------------------------------------------------------------ */
+export const SHAPE_VARIANTS = [
+  { id: 'rectangle', label: 'Rectangle' },
+  { id: 'ellipse',   label: 'Ellipse' },
+  { id: 'triangle',  label: 'Triangle' },
+  { id: 'diamond',   label: 'Diamond' },
+  { id: 'star',      label: 'Star' },
+  { id: 'line',      label: 'Line' },
+  { id: 'arrow',     label: 'Arrow' },
+];
+
+/** Points on a 0–100 grid, or null for shapes drawn with their own path. */
+function shapePoints(variant) {
+  switch (variant) {
+    case 'triangle': return [[50, 2], [98, 98], [2, 98]];
+    case 'diamond':  return [[50, 2], [98, 50], [50, 98], [2, 50]];
+    case 'star': {
+      const pts = [];
+      for (let i = 0; i < 10; i++) {
+        const r = i % 2 ? 21 : 49;
+        const a = (Math.PI / 5) * i - Math.PI / 2;
+        pts.push([50 + Math.cos(a) * r * 2, 50 + Math.sin(a) * r * 2]);
+      }
+      return pts;
+    }
+    case 'arrow': return [[2, 36], [64, 36], [64, 14], [98, 50], [64, 86], [64, 64], [2, 64]];
+    case 'line':  return [[2, 50], [98, 50]];
+    default: return null;
+  }
+}
+
+const DASH_ARRAY = { solid: '', dashed: '6 4', dotted: '1.5 4' };
+
+function shapeSvg(s, u) {
+  const stroke = Math.max(0, u(s.strokeWidth ?? 0));
+  const fill = (s.fillOpacity ?? 0) > 0 ? rgba(s.fill, s.fillOpacity) : 'none';
+  const dash = DASH_ARRAY[s.dash] ?? '';
+  const common = `fill="${fill}" stroke="${s.stroke}" stroke-width="${stroke}" vector-effect="non-scaling-stroke" stroke-linejoin="round" stroke-linecap="round"${dash ? ` stroke-dasharray="${dash}"` : ''}`;
+
+  let body;
+  if (s.variant === 'ellipse') {
+    body = `<ellipse cx="50" cy="50" rx="48" ry="48" ${common}/>`;
+  } else if (s.variant === 'rectangle' || !s.variant) {
+    const r = Math.max(0, Math.min(40, s.radius ?? 0));
+    body = `<rect x="2" y="2" width="96" height="96" rx="${r}" ${common}/>`;
+  } else if (s.variant === 'line') {
+    body = `<line x1="2" y1="50" x2="98" y2="50" fill="none" stroke="${s.stroke}" stroke-width="${stroke}" vector-effect="non-scaling-stroke" stroke-linecap="round"${dash ? ` stroke-dasharray="${dash}"` : ''}/>`;
+  } else {
+    const pts = shapePoints(s.variant) ?? [];
+    body = `<polygon points="${pts.map(([x, y]) => `${x},${y}`).join(' ')}" ${common}/>`;
+  }
+
+  const spin = s.rotation ? ` transform="rotate(${s.rotation} 50 50)"` : '';
+  return `<svg viewBox="0 0 100 100" preserveAspectRatio="none" style="width:100%;height:100%;display:block;overflow:visible"><g${spin}>${body}</g></svg>`;
+}
+
+function paintShape(c, s, box, u) {
+  const stroke = Math.max(0, u(s.strokeWidth ?? 0));
+  const hasFill = (s.fillOpacity ?? 0) > 0;
+
+  c.save();
+  c.translate(box.x + box.w / 2, box.y + box.h / 2);
+  if (s.rotation) c.rotate((s.rotation * Math.PI) / 180);
+  c.translate(-box.w / 2, -box.h / 2);
+
+  const sx = box.w / 100;
+  const sy = box.h / 100;
+  const at = (x, y) => [x * sx, y * sy];
+
+  c.beginPath();
+  if (s.variant === 'ellipse') {
+    c.ellipse(box.w / 2, box.h / 2, (box.w / 2) * 0.96, (box.h / 2) * 0.96, 0, 0, Math.PI * 2);
+  } else if (s.variant === 'rectangle' || !s.variant) {
+    const r = Math.min((s.radius ?? 0) * sx, box.w / 2, box.h / 2);
+    roundRect(c, 2 * sx, 2 * sy, 96 * sx, 96 * sy, r);
+  } else {
+    const pts = shapePoints(s.variant) ?? [];
+    pts.forEach(([x, y], i) => {
+      const [px, py] = at(x, y);
+      if (i) c.lineTo(px, py); else c.moveTo(px, py);
+    });
+    if (s.variant !== 'line') c.closePath();
+  }
+
+  if (hasFill && s.variant !== 'line') {
+    c.fillStyle = rgba(s.fill, s.fillOpacity);
+    c.fill();
+  }
+  if (stroke > 0) {
+    c.lineWidth = stroke;
+    c.strokeStyle = s.stroke;
+    c.lineJoin = 'round';
+    c.lineCap = 'round';
+    if (s.dash === 'dashed') c.setLineDash([stroke * 3, stroke * 2]);
+    else if (s.dash === 'dotted') c.setLineDash([stroke * 0.8, stroke * 2.2]);
+    c.stroke();
+  }
+  c.restore();
+}
+
+/* ------------------------------------------------------------------ */
 /* locator inset — project a study area into a small box               */
 /* ------------------------------------------------------------------ */
 function projectRings(geojson, box, stride = 1) {
@@ -292,32 +454,69 @@ export const ELEMENT_TYPES = {
     style: { ...TEXT, ...CARD, size: 11, gap: 2.6, swatch: 13 },
     dom(inner, elm, ctx) {
       const { u } = ctx;
-      const rows = legendRows();
+      const groups = groupLegendRows(legendRows());
       const sw = u(elm.style.swatch ?? 13);
-      const body = rows.length
-        ? rows.map((r) => `<div style="display:flex;align-items:center;gap:${u(5)}px;margin-bottom:${u(elm.style.gap ?? 2.6)}px">
-             ${swatchHtml(r.swatch, r.color, sw)}
-             <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.label)}</span>
-           </div>`).join('')
+      const gap = u(elm.style.gap ?? 2.6);
+
+      const body = groups.length
+        ? groups.map((g) => {
+            if (g.kind === 'ramp') {
+              const [from, to] = rampEnds(g.labels);
+              return `<div style="margin-bottom:${gap * 1.6}px">
+                <div style="height:${sw * 0.86}px;border-radius:${sw * 0.16}px;background:linear-gradient(90deg,${g.colors.join(',')})"></div>
+                <div style="display:flex;justify-content:space-between;gap:${u(4)}px;margin-top:${u(1.4)}px;opacity:.72">
+                  <span>${esc(from)}</span><span>${esc(to)}</span>
+                </div>
+              </div>`;
+            }
+            return `<div style="display:flex;align-items:center;gap:${u(5)}px;margin-bottom:${gap}px">
+              ${swatchHtml(g.swatch, g.color, sw, g)}
+              <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(g.label)}</span>
+            </div>`;
+          }).join('')
         : `<div style="opacity:.55">Turn on a layer and it appears here.</div>`;
+
       inner.innerHTML = headingHtml(elm.text, elm.style, u) + body;
     },
     paint(c, elm, box, ctx) {
       const { u } = ctx;
       const s = elm.style;
       let y = paintHeading(c, elm.text, box, s, u);
-      const rows = legendRows();
+      const groups = groupLegendRows(legendRows());
       const sw = u(s.swatch ?? 13);
       const lh = u(s.size) * (s.lineHeight ?? 1.32);
-      const step = Math.max(lh, sw) + u(s.gap ?? 2.6);
-      if (!rows.length) {
+      const gap = u(s.gap ?? 2.6);
+      const bottom = box.y + box.h;
+
+      if (!groups.length) {
         drawLine(c, 'Turn on a layer and it appears here.', box.x, y, box.w, { ...s, u, color: rgba(s.color, 0.55) });
         return;
       }
-      for (const r of rows) {
-        if (y + step > box.y + box.h + step * 0.4) break;
-        drawSwatch(c, r.swatch, box.x, y + (lh - sw * 0.84) / 2 - u(0.5), sw, r.color);
-        drawLine(c, r.label, box.x + sw + u(5), y, box.w - sw - u(5), { ...s, u });
+
+      for (const g of groups) {
+        if (g.kind === 'ramp') {
+          const barH = sw * 0.86;
+          if (y + barH + lh > bottom + lh * 0.4) break;
+          const grad = c.createLinearGradient(box.x, 0, box.x + box.w, 0);
+          g.colors.forEach((color, i) => grad.addColorStop(g.colors.length === 1 ? 0 : i / (g.colors.length - 1), color));
+          roundRect(c, box.x, y, box.w, barH, barH * 0.16);
+          c.fillStyle = grad;
+          c.fill();
+
+          const [from, to] = rampEnds(g.labels);
+          const labelY = y + barH + u(1.4);
+          drawLine(c, from, box.x, labelY, box.w / 2, { ...s, u, color: rgba(s.color, 0.72) });
+          drawLine(c, to, box.x + box.w / 2, labelY, box.w / 2, { ...s, u, align: 'right', color: rgba(s.color, 0.72) });
+          y = labelY + lh + gap * 1.6;
+          continue;
+        }
+
+        const step = Math.max(lh, sw) + gap;
+        if (y + step > bottom + step * 0.4) break;
+        // `inkColor` lets a hollow swatch borrow the legend's own text colour,
+        // which is what `currentColor` does for the on-screen twin.
+        drawSwatch(c, g.swatch, box.x, y + (lh - sw * 0.84) / 2 - u(0.5), sw, g.color, { ...g, inkColor: s.color });
+        drawLine(c, g.label, box.x + sw + u(5), y, box.w - sw - u(5), { ...s, u });
         y += step;
       }
     },
@@ -542,6 +741,25 @@ export const ELEMENT_TYPES = {
     },
   },
 
+  shape: {
+    label: 'Shape', icon: '◇', hint: 'Rectangle, circle, line, arrow or star',
+    inspect: ['shape'],
+    defaults: { x: 40, y: 45, w: 16, h: 12 },
+    style: {
+      ...PLAIN,
+      variant: 'rectangle',
+      fill: '#0369a1', fillOpacity: 0.18,
+      stroke: '#0369a1', strokeWidth: 1.6,
+      radius: 2, rotation: 0, dash: 'solid',
+    },
+    dom(inner, elm, ctx) {
+      inner.innerHTML = shapeSvg(elm.style, ctx.u);
+    },
+    paint(c, elm, box, ctx) {
+      paintShape(c, elm.style, box, ctx.u);
+    },
+  },
+
   logo: {
     label: 'Logo / image', icon: '▣', hint: 'Drop in an organisation logo',
     inspect: ['logo', 'chrome'],
@@ -574,7 +792,7 @@ export const ELEMENT_TYPES = {
 /** Order shown in the "Add element" panel. */
 export const ELEMENT_ORDER = [
   'title', 'subtitle', 'text', 'legend', 'stats', 'metadata',
-  'north', 'scale', 'inset', 'logo', 'neatline', 'credits',
+  'north', 'scale', 'inset', 'shape', 'logo', 'neatline', 'credits',
 ];
 
 /* ------------------------------------------------------------------ */

@@ -62,20 +62,55 @@ export const BASEMAP_GROUPS = {
 /* ------------------------------------------------------------------ */
 /* Paper                                                               */
 /* ------------------------------------------------------------------ */
+/**
+ * Paper, smallest to largest, then the non-ISO sizes.
+ *
+ * `group` is only there so the picker can put a rule between wall-sized
+ * plotter paper and the sheet sizes an office printer can actually take —
+ * choosing A0 by mistake is an expensive surprise otherwise.
+ */
 export const PAPER_SIZES = {
-  a5:     { label: 'A5',            wIn: 5.83, hIn: 8.27 },
-  a4:     { label: 'A4',            wIn: 8.27, hIn: 11.69 },
-  a3:     { label: 'A3',            wIn: 11.69, hIn: 16.54 },
-  a2:     { label: 'A2',            wIn: 16.54, hIn: 23.39 },
-  letter: { label: 'US Letter',     wIn: 8.5,  hIn: 11 },
-  legal:  { label: 'US Legal',      wIn: 8.5,  hIn: 14 },
-  tabloid:{ label: 'Tabloid',       wIn: 11,   hIn: 17 },
-  square: { label: 'Social square', wIn: 8,    hIn: 8 },
-  story:  { label: 'Social story',  wIn: 6.75, hIn: 12 },
-  slide:  { label: 'Presentation',  wIn: 13.33, hIn: 7.5, fixedOrientation: 'landscape' },
+  a6:     { label: 'A6',            wIn: 4.13, hIn: 5.83,  group: 'Sheet' },
+  a5:     { label: 'A5',            wIn: 5.83, hIn: 8.27,  group: 'Sheet' },
+  a4:     { label: 'A4',            wIn: 8.27, hIn: 11.69, group: 'Sheet' },
+  a3:     { label: 'A3',            wIn: 11.69, hIn: 16.54, group: 'Sheet' },
+  letter: { label: 'US Letter',     wIn: 8.5,  hIn: 11,    group: 'Sheet' },
+  legal:  { label: 'US Legal',      wIn: 8.5,  hIn: 14,    group: 'Sheet' },
+  tabloid:{ label: 'Tabloid',       wIn: 11,   hIn: 17,    group: 'Sheet' },
+
+  a2:     { label: 'A2',            wIn: 16.54, hIn: 23.39, group: 'Large format' },
+  a1:     { label: 'A1',            wIn: 23.39, hIn: 33.11, group: 'Large format' },
+  a0:     { label: 'A0',            wIn: 33.11, hIn: 46.81, group: 'Large format' },
+  b1:     { label: 'B1',            wIn: 27.83, hIn: 39.37, group: 'Large format' },
+  arch_d: { label: 'ARCH D',        wIn: 24,    hIn: 36,    group: 'Large format' },
+  arch_e: { label: 'ARCH E',        wIn: 36,    hIn: 48,    group: 'Large format' },
+  poster: { label: 'Poster 24×36',  wIn: 24,    hIn: 36,    group: 'Large format' },
+
+  square: { label: 'Social square', wIn: 8,    hIn: 8,     group: 'Screen' },
+  story:  { label: 'Social story',  wIn: 6.75, hIn: 12,    group: 'Screen' },
+  slide:  { label: 'Presentation',  wIn: 13.33, hIn: 7.5,  group: 'Screen', fixedOrientation: 'landscape' },
 };
 
 export const EXPORT_DPI = { screen: 96, standard: 150, print: 300 };
+
+/**
+ * The ceiling on one exported image, in pixels.
+ *
+ * Browsers refuse to allocate a canvas beyond a few hundred megapixels, and
+ * long before that the tab runs out of memory mid-export. A0 at 300 dpi is
+ * 139 megapixels of map, so on the large-format sizes this limit is reached
+ * routinely rather than exceptionally — which is why the page setup panel
+ * shows the resolution you will actually get instead of the one you asked
+ * for.
+ */
+export const MAX_EXPORT_PIXELS = 120e6;
+
+/** The dpi an export will really achieve at this paper size. */
+export function effectiveDpi(wIn, hIn, dpi) {
+  const px = wIn * dpi * hIn * dpi;
+  if (px <= MAX_EXPORT_PIXELS) return dpi;
+  return Math.floor(dpi * Math.sqrt(MAX_EXPORT_PIXELS / px));
+}
 
 /* ------------------------------------------------------------------ */
 /* Typography available to end users                                   */
@@ -142,9 +177,16 @@ export const ADMIN_LEVELS = [
 /** Public endpoints. Swap these for self-hosted instances in production. */
 export const ENDPOINTS = {
   nominatim: 'https://nominatim.openstreetmap.org/search',
+  // Raced, not tried in order — see data/overpass.js. More mirrors means a
+  // congested one costs seconds rather than the whole request.
+  //
+  // Every entry MUST carry the full planet. Regional instances (overpass.osm.ch
+  // is Switzerland-only, for example) answer fast with a valid *empty* result
+  // outside their extract, which a race would happily accept as the winner.
   overpass: [
-    'https://overpass-api.de/api/interpreter',
     'https://overpass.kumi.systems/api/interpreter',
+    'https://overpass-api.de/api/interpreter',
+    'https://overpass.private.coffee/api/interpreter',
   ],
 };
 

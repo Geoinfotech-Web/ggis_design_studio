@@ -7,6 +7,7 @@
  */
 
 import { el } from '../core/dom.js';
+import { TRANSPARENT, isTransparent } from '../layers/symbology.js';
 
 export const head = (title, sub) =>
   el('div.panel-head', {}, [el('h2', { text: title }), sub ? el('p', { text: sub }) : null]);
@@ -26,13 +27,29 @@ export const labelled = (text, control, hint) =>
     hint ? el('span', { text: hint, style: { display: 'block', marginTop: '3px', fontSize: '10px', color: '#94a3b8', lineHeight: '1.35' } }) : null,
   ]);
 
-/** A <select> built from [{value,label}] or plain strings. */
+/**
+ * A <select> built from [{value,label}] or plain strings.
+ *
+ * An option may carry a `group`, which puts it under an <optgroup> — the
+ * difference between a flat list of fourteen paper sizes and a list that
+ * separates what an office printer takes from what needs a plotter.
+ */
 export function select(options, value, onChange, props = {}) {
   const node = el('select.field', { ...props });
+  const groups = new Map();
+
   for (const opt of options) {
     const o = typeof opt === 'string' ? { value: opt, label: opt } : opt;
-    node.append(el('option', { value: o.value, text: o.label, selected: String(o.value) === String(value) }));
+    const option = el('option', { value: o.value, text: o.label, selected: String(o.value) === String(value) });
+    if (!o.group) { node.append(option); continue; }
+    if (!groups.has(o.group)) {
+      const g = el('optgroup', { label: o.group });
+      groups.set(o.group, g);
+      node.append(g);
+    }
+    groups.get(o.group).append(option);
   }
+
   node.value = value ?? '';
   node.addEventListener('change', () => onChange(node.value));
   return node;
@@ -85,10 +102,62 @@ export function seg(options, value, onChange) {
   return node;
 }
 
-export function colorInput(value, onChange) {
-  const node = el('input.color-input', { type: 'color', value: value ?? '#000000' });
+/**
+ * Colour picker, optionally able to say "no colour at all".
+ *
+ * `<input type="color">` has no way to express empty — it always hands back
+ * six hex digits. So when transparency is allowed the input is paired with a
+ * toggle, and an empty value is shown as a hollow chequered swatch sitting on
+ * top of it, the way every GIS draws "no brush".
+ *
+ * @param {string} value  a hex colour, or TRANSPARENT
+ * @param {(value:string)=>void} onChange
+ * @param {{transparent?:boolean, title?:string}} [opts]
+ */
+export function colorInput(value, onChange, opts = {}) {
+  const empty = isTransparent(value);
+  const node = el('input.color-input', {
+    type: 'color',
+    // Keep the last real colour under the picker so turning transparency off
+    // returns to where the user was, not to black.
+    value: empty ? (opts.lastColor ?? '#94a3b8') : (value ?? '#000000'),
+    title: opts.title ?? 'Pick a colour',
+  });
   node.addEventListener('input', () => onChange(node.value));
-  return node;
+  if (!opts.transparent) return node;
+
+  const wrap = el('span', { style: { position: 'relative', display: 'inline-flex', flex: 'none' } }, [node]);
+
+  if (empty) {
+    // Sits over the input so the control still opens the picker on click.
+    wrap.append(el('span', {
+      'aria-hidden': 'true',
+      style: {
+        position: 'absolute', inset: '0', borderRadius: '7px', pointerEvents: 'none',
+        border: '1px solid var(--line-strong)',
+        background:
+          'repeating-conic-gradient(var(--surface-2) 0% 25%, var(--surface) 0% 50%) 50% / 7px 7px',
+      },
+    }));
+  }
+
+  const toggle = el('button', {
+    type: 'button',
+    text: empty ? '◧' : '∅',
+    title: empty ? 'Give this a colour again' : 'No colour — outline only',
+    'aria-label': empty ? 'Give this a colour again' : 'No colour',
+    style: {
+      flex: 'none', height: '26px', width: '22px', cursor: 'pointer', padding: '0',
+      fontSize: '11px', lineHeight: '1',
+      border: `1px solid ${empty ? 'var(--accent-bright)' : 'var(--line)'}`,
+      borderRadius: '7px',
+      background: empty ? 'var(--accent-soft)' : 'var(--surface)',
+      color: 'var(--ink-soft)',
+    },
+  });
+  toggle.addEventListener('click', () => onChange(empty ? node.value : TRANSPARENT));
+
+  return el('span', { style: { display: 'inline-flex', gap: '3px', alignItems: 'center', flex: 'none' } }, [wrap, toggle]);
 }
 
 /** A label + control on one line — the inspector's workhorse. */

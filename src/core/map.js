@@ -74,6 +74,8 @@ export function initMap(container = 'map') {
   map.on('rotateend', syncView);
 
   applyLook(state.mapLook);
+  // Dev-only handle so the live style can be inspected from the console.
+  if (import.meta.env?.DEV) window.__map = map;
   return map;
 }
 

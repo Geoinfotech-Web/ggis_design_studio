@@ -49,7 +49,6 @@ async function loadBoundary() {
       kind: 'polygon',
       color: '#0369a1',
       style: { fillOpacity: 0.07, strokeWidth: 2.2, stroke: '#0369a1' },
-      legend: [{ label: `${area.name} boundary`, color: '#0369a1', swatch: 'polygon' }],
       description: area.displayName,
       meta: { slug: 'study-area', level: area.level },
     });

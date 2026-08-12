@@ -103,7 +103,7 @@ function lookControls() {
       Object.entries(MAP_LOOKS).map(([value, l]) => ({ value, label: l.label })),
       look.filter,
       (value) => setLook({ filter: value }),
-    )),
+    ), hueSafe(look.filter) ? '' : 'Heads up: this filter recolours your data and analysis layers too, so they will no longer match their legend.'),
     labelled('Paper texture', select(
       Object.entries(MAP_TEXTURES).map(([value, t]) => ({ value, label: t.label })),
       look.texture,
@@ -135,6 +135,14 @@ function lookControls() {
     }, 'ghost', { style: { width: '100%' } }),
   ]);
 }
+
+/**
+ * The look is a CSS filter over the whole map canvas, overlays included.
+ * These leave hues alone; the rest genuinely restyle the data as well.
+ */
+const HUE_SAFE = new Set(['none', 'soft', 'vivid']);
+const hueSafe = (filter) => HUE_SAFE.has(filter)
+  || !state.layers.some((l) => l.source === 'analysis' || l.source === 'osm' || l.source === 'overture');
 
 /** Vignette drags should not rebuild the panel on every frame. */
 function setLookQuiet(patch) {
