@@ -4,16 +4,50 @@ import turfArea from '@turf/area';
 import turfBbox from '@turf/bbox';
 import turfCentroid from '@turf/centroid';
 import turfBuffer from '@turf/buffer';
+import turfUnion from '@turf/union';
 
 const unwrap = (m) => (typeof m === 'function' ? m : m.default);
 const area = unwrap(turfArea);
 const bbox = unwrap(turfBbox);
 const centroid = unwrap(turfCentroid);
 const buffer = unwrap(turfBuffer);
+const union = unwrap(turfUnion);
 
 /** Area of any GeoJSON in km², using the geodesic (spherical) formula. */
 export function areaKm2(geojson) {
   try { return area(geojson) / 1e6; } catch { return 0; }
+}
+
+/**
+ * The area of several polygons *taken together*, in km².
+ *
+ * Not the sum of their areas. Turf's `area()` adds every feature up, which is
+ * right for a collection of separate things and wrong for study areas, where
+ * an LGA and the state around it are both reasonable to add and the ground
+ * they share must not be counted twice. Dissolving them first is what makes
+ * the printed figure the area of the map rather than an arithmetic total.
+ *
+ * Falls back to the plain sum if the boundaries defeat the union — OSM
+ * outlines are occasionally self-intersecting, and an over-count is a much
+ * smaller failure than a study area with no size at all.
+ */
+export function combinedAreaKm2(geojsons) {
+  const polygons = [];
+  for (const g of geojsons ?? []) {
+    for (const f of g?.features ?? (g ? [g] : [])) {
+      if (f?.geometry?.type === 'Polygon' || f?.geometry?.type === 'MultiPolygon') polygons.push(f);
+    }
+  }
+  if (!polygons.length) return 0;
+  if (polygons.length === 1) return areaKm2(polygons[0]);
+
+  try {
+    // @turf/union v7 takes a FeatureCollection and dissolves the whole thing.
+    const dissolved = union({ type: 'FeatureCollection', features: polygons });
+    if (dissolved) return areaKm2(dissolved);
+  } catch { /* fall through to the sum */ }
+
+  return polygons.reduce((sum, f) => sum + areaKm2(f), 0);
 }
 
 /** [west, south, east, north] */

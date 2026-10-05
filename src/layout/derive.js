@@ -9,7 +9,7 @@
 
 import { state } from '../core/store.js';
 import { collectLegend } from '../layers/registry.js';
-import { APP, PAPER_SIZES, ATTRIBUTION_TEXT } from '../core/constants.js';
+import { APP, PAPER_SIZES, attributionFor, basemapSpec } from '../core/constants.js';
 import { formatArea, formatNumber, formatDMS, metresPerPixel, niceScaleBar } from '../core/geo.js';
 
 /**
@@ -18,14 +18,16 @@ import { formatArea, formatNumber, formatDMS, metresPerPixel, niceScaleBar } fro
  * gradient bar rather than a column of squares.
  */
 export function legendRows() {
-  return collectLegend().map(({ label, color, swatch, icon, dash }) => ({
+  return collectLegend().map(({ label, color, swatch, icon, dash, width }) => ({
     label,
     color,
     swatch: swatch ?? 'polygon',
     // Carried so the printed swatch is the mark the map actually draws —
-    // a cross for hospitals, a dashed rule for a proposed road.
+    // a cross for hospitals, a dashed rule for a proposed road, a trunk road
+    // heavier than the service road below it.
     icon: icon ?? '',
     dash: dash ?? 'solid',
+    ...(width ? { width } : {}),
   }));
 }
 
@@ -65,10 +67,20 @@ export function metadataRows() {
   if (state.layers.some((l) => l.meta?.merged?.overtureAdded)) sources.add('Overture Maps');
   if (state.layers.some((l) => l.source === 'upload')) sources.add('User data');
   if (state.analysisRuns.length) sources.add('On-device analysis');
-  sources.add('OpenFreeMap basemap');
+  // Named, not assumed: "OpenFreeMap basemap" was hard-coded here and is wrong
+  // on nine of the twelve basemaps this studio now offers.
+  sources.add(`${basemapSpec(state.basemap).label} basemap`);
+
+  // With several study areas the block names all of them. The title can say
+  // "Lagos and 2 other areas" and still be a title; map information is where
+  // a reader goes to find out which two, and it has to answer.
+  const parts = state.studyArea?.parts ?? [];
 
   return [
     { label: 'Prepared by', value: APP.org },
+    ...(parts.length > 1
+      ? [{ label: 'Study areas', value: parts.map((p) => p.name).join(', ') }]
+      : []),
     { label: 'Date', value: new Date().toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }) },
     { label: 'Projection', value: 'WGS 84 / Web Mercator (EPSG:3857)' },
     { label: 'Centre', value: `${formatDMS(center[1], 'lat')}, ${formatDMS(center[0], 'lng')}` },
@@ -80,7 +92,9 @@ export function metadataRows() {
 
 /** Attribution line, plus a note on any assumption-based analysis. */
 export function creditsText() {
-  const parts = [ATTRIBUTION_TEXT];
+  // The basemap names itself: these are no longer all OpenStreetMap, and a
+  // satellite map crediting OpenFreeMap is a false statement on a printed page.
+  const parts = [attributionFor(state.basemap)];
   // Only credited when Overture actually contributed features — a map whose
   // layers came back entirely from OpenStreetMap should not claim otherwise.
   if (state.layers.some((l) => l.meta?.merged?.overtureAdded)) {

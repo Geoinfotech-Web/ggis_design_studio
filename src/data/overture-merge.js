@@ -247,19 +247,9 @@ export const SUPPLEMENTS = {
   ]),
 
   /* ---- land use ------------------------------------------------------ */
-  landuse: landUse('landuse', (info) => {
-    const tag = pick(`${info.class} ${info.subtype}`, [
-      [/\b(residential)\b/, 'residential'],
-      [/\b(retail)\b/, 'retail'],
-      [/\b(commercial)\b/, 'commercial'],
-      [/\b(industrial|works|brownfield)\b/, 'industrial'],
-      [/\b(landfill|quarry)\b/, 'landfill'],
-      [/\b(agriculture|farmland|orchard|vineyard)\b/, 'farmland'],
-      [/\b(park|grass|village_green|recreation|golf|pitch)\b/, 'grass'],
-      [/\b(military)\b/, 'military'],
-    ]);
-    return tag ? { landuse: tag } : null;
-  }),
+  // The `landuse` supplement went with the "Land use zones" dataset it
+  // supplemented — see the note in osm-catalog.js. A supplement with no
+  // dataset to attach to is never asked for.
 
   farmland: landUse('farmland', (info) =>
     (/\b(agriculture|farmland|farmyard|orchard|vineyard)\b/.test(`${info.class} ${info.subtype}`)

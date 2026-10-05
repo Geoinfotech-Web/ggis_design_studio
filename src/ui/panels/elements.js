@@ -13,9 +13,11 @@ import { $, el, fill } from '../../core/dom.js';
 import { state, subscribe, touch, checkpoint } from '../../core/store.js';
 import { notify } from '../../core/toast.js';
 import { ELEMENT_TYPES, ELEMENT_ORDER, createElement, elementLabel } from '../../layout/elements.js';
+import { elementIcon } from '../../layout/element-icons.js';
 import { alignElements, distributeElements, matchSize } from '../../layout/align.js';
 import { addElement, removeElement, reorderElement, duplicateElement, selectElement, renderElements } from '../artboard.js';
 import { head, section, row, empty, miniBtn, seg, button, stack, inline } from '../controls.js';
+import { uiIcon } from '../ui-icons.js';
 
 let pane;
 let alignHost;
@@ -53,7 +55,7 @@ function addGrid() {
       title: def.hint,
       style: { border: '1px solid var(--line)' },
     }, [
-      el('span.row-ico', { text: def.icon }),
+      el('span.row-ico', {}, [elementIcon(type)]),
       el('span.row-main', {}, [el('span.row-title', { text: def.label, style: { display: 'block' } })]),
     ]);
     btn.addEventListener('click', () => place(type));
@@ -67,7 +69,7 @@ function addGrid() {
 /* ------------------------------------------------------------------ */
 const alignHelp = () => el('p', {
   style: { margin: 0, fontSize: '11.5px', color: '#94a3b8', lineHeight: '1.5' },
-  html: 'Tick the boxes below to line elements up — left, centre, right, or spread evenly. A single element can also be dropped onto any corner of the page from the <b>Arrange</b> section on the right.',
+  text: 'Tick two or more elements to align them.',
 });
 
 function alignToolbar() {
@@ -147,33 +149,44 @@ function elementRow(elm) {
     refreshAlign();
   });
 
+  // Hiding and locking are states, not just commands, so their buttons say
+  // which one the element is in — a struck-through eye on a hidden element,
+  // a closed padlock on a locked one — rather than only what clicking does.
   const actions = [
-    miniBtn(elm.hidden ? '◌' : '👁', elm.hidden ? 'Show' : 'Hide', () => {
+    miniBtn(uiIcon(elm.hidden ? 'hide' : 'show'), elm.hidden ? 'Show on the page' : 'Hide from the page', () => {
       checkpoint();
       elm.hidden = !elm.hidden;
       touch('elements');
       renderElements();
-    }),
-    miniBtn(elm.locked ? '🔒' : '🔓', elm.locked ? 'Unlock' : 'Lock position', () => {
+    }, { pressed: elm.hidden }),
+    miniBtn(uiIcon(elm.locked ? 'lock' : 'unlock'), elm.locked ? 'Unlock position' : 'Lock position', () => {
       checkpoint();
       elm.locked = !elm.locked;
       touch('elements');
       renderElements();
-    }),
-    miniBtn('⧉', 'Duplicate', () => { duplicateElement(elm.id); renderElements(); }),
-    miniBtn('▲', 'Bring forward', () => { reorderElement(elm.id, 1); renderElements(); }),
-    miniBtn('▼', 'Send backward', () => { reorderElement(elm.id, -1); renderElements(); }),
-    miniBtn('✕', 'Delete', () => { ticked.delete(elm.id); removeElement(elm.id); renderElements(); }),
+    }, { pressed: elm.locked }),
+    miniBtn(uiIcon('duplicate'), 'Duplicate', () => { duplicateElement(elm.id); renderElements(); }),
+    miniBtn(uiIcon('forward'), 'Bring forward', () => { reorderElement(elm.id, 1); renderElements(); }),
+    miniBtn(uiIcon('backward'), 'Send backward', () => { reorderElement(elm.id, -1); renderElements(); }),
+    miniBtn(uiIcon('trash'), 'Delete', () => { ticked.delete(elm.id); removeElement(elm.id); renderElements(); }, { danger: true }),
   ];
 
+  // The element's own words are the useful label — but a title element can
+  // hold a whole sentence, so the row shows as much as the panel is wide and
+  // ends it with an ellipsis. It used to be cut at 32 characters, which is a
+  // guess about the panel width that is wrong at every width: too early on a
+  // wide screen, still too long on a phone.
   const node = row({
-    icon: ELEMENT_TYPES[elm.type]?.icon ?? '·',
-    title: elm.text ? String(elm.text).slice(0, 32) : elementLabel(elm),
-    sub: `${elementLabel(elm)}${elm.hidden ? ' · hidden' : ''}${elm.locked ? ' · locked' : ''}`,
+    icon: elementIcon(elm.type),
+    title: elm.text ? String(elm.text).replace(/\s+/g, ' ').trim() || elementLabel(elm) : elementLabel(elm),
+    sub: [elementLabel(elm), elm.hidden ? 'hidden' : null, elm.locked ? 'locked' : null]
+      .filter(Boolean).join(' · '),
     active: elm.id === state.selectedElementId,
     onClick: () => selectElement(elm.id),
     actions,
   });
+  node.classList.add('row--element');
+  if (elm.hidden) node.classList.add('is-muted');
   node.prepend(tick);
   return node;
 }

@@ -288,38 +288,84 @@ export function dashGroups(sym, fallback = 'solid') {
 }
 
 /**
- * Line width for a layer, as a MapLibre expression.
+ * Line thicknesses are **millimetres on the printed page**, everywhere.
  *
- * Two things a flat number cannot do: hold the class hierarchy a road map
- * needs (a motorway heavier than a service road), and stay legible when you
- * zoom out — a 1.6 px hairline over a whole state is invisible even though it
- * is genuinely being drawn.
+ * This is how a desktop GIS states a line width, and it is the only definition
+ * that means the same thing twice: a "2 pixel" road is a different road on a
+ * laptop, on a phone and on an A0 plot, whereas 0.5 mm is half a millimetre on
+ * all three. It also makes the preview honest — the artboard knows how many
+ * screen pixels a millimetre of paper currently occupies, so what you see is
+ * the weight that prints.
+ *
+ * The consequence worth stating: thickness no longer changes with zoom. A
+ * 0.5 mm road is 0.5 mm zoomed in and 0.5 mm zoomed out, which is what a
+ * cartographer means by a line weight. Zooming out shows more roads, not
+ * thinner ones.
  */
-export function lineWidth(sym, base = 1.8) {
+export const DEFAULT_LINE_WIDTH_MM = 0.45;
+
+/** Screen pixels per millimetre of paper, when the artboard has not said. */
+const FALLBACK_PX_PER_MM = 3.3;
+
+/**
+ * The base thickness stored on a layer's style, in millimetres.
+ *
+ * Tolerant of what earlier versions left behind: `width` used to be a screen
+ * pixel count and `strokeWidth` used to hold the whole zoom expression, and a
+ * saved project or an analysis result can still carry either. A stored
+ * expression is not a thickness at all, so the default stands in for it; a
+ * stored pixel count is converted on the old screen-scale assumption, which
+ * lands an old project within a hair of how it used to look.
+ */
+export function baseWidthOf(style = {}) {
+  if (Number.isFinite(style.widthMm)) return style.widthMm;
+  if (Number.isFinite(style.width)) return style.width / FALLBACK_PX_PER_MM;
+  if (Number.isFinite(style.strokeWidth)) return style.strokeWidth / FALLBACK_PX_PER_MM;
+  return DEFAULT_LINE_WIDTH_MM;
+}
+
+/**
+ * Line width for a layer, as a MapLibre value in screen pixels.
+ *
+ * Millimetres are the currency everywhere else; this is the one place they
+ * become pixels, because that is the only unit MapLibre paints in. `pxPerMm`
+ * comes from the artboard — page width in millimetres against page width on
+ * screen — so the same stored 0.5 mm draws correctly at any window size and,
+ * in the export, at any dpi.
+ *
+ * A flat number still cannot hold the class hierarchy a road map needs, so a
+ * categorised layer returns a `match` and each class keeps its own weight.
+ */
+export function lineWidth(sym, baseMm = DEFAULT_LINE_WIDTH_MM, pxPerMm = FALLBACK_PX_PER_MM) {
+  // Below about a third of a pixel a line stops being drawn at all rather than
+  // being drawn faintly, which reads as a bug rather than as a hairline.
+  const px = (mm) => Number(Math.max(0.35, (Number(mm) || 0) * pxPerMm).toFixed(3));
   const perClass = sym?.mode === 'categorised' && sym.categories.some((c) => c.width);
+  if (!perClass) return px(baseMm);
 
-  /** Per-class width as a plain number expression, or the base width. */
-  const widthOf = () => {
-    if (!perClass) return base;
-    const match = ['match', ['to-string', ['coalesce', ['get', sym.field], '']]];
-    for (const c of sym.categories) match.push(String(c.value), c.width ?? base);
-    match.push(base);
-    return match;
-  };
+  // Class weights are relative to the catalogue's default, so making the
+  // layer heavier makes every class heavier *in proportion* — trunk roads stay
+  // ahead of service roads instead of the hierarchy collapsing onto one number.
+  const factor = baseMm / DEFAULT_LINE_WIDTH_MM;
+  const match = ['match', ['to-string', ['coalesce', ['get', sym.field], '']]];
+  for (const c of sym.categories) {
+    match.push(String(c.value), px((c.width ?? DEFAULT_LINE_WIDTH_MM) * factor));
+  }
+  match.push(px(baseMm));
+  return match;
+}
 
-  const scaled = (factor) => {
-    const w = widthOf();
-    return typeof w === 'number' ? w * factor : ['*', factor, w];
-  };
-
-  // `zoom` is only legal as the input of a TOP-LEVEL step/interpolate — nesting
-  // the zoom curve inside a multiply makes MapLibre reject the whole layer, so
-  // the class widths go in the output values instead.
-  return ['interpolate', ['linear'], ['zoom'],
-    6, scaled(0.6),
-    11, scaled(1),
-    16, scaled(2.4),
-  ];
+/**
+ * The stroke a legend swatch draws for a line of thickness `mm`.
+ *
+ * Proportional to the layer's weight rather than equal to it: a swatch is
+ * about 13 pt wide, so a 1.5 mm trunk road drawn at its true thickness would
+ * be a black block. Clamped at both ends — a hairline still has to be visible
+ * in print, and the heaviest class still has to read as a line.
+ */
+export function swatchStroke(size, mm) {
+  const rel = (Number(mm) || DEFAULT_LINE_WIDTH_MM) / DEFAULT_LINE_WIDTH_MM;
+  return Math.max(size * 0.1, Math.min(size * 0.6, size * 0.26 * rel));
 }
 
 /* ------------------------------------------------------------------ */
@@ -337,18 +383,24 @@ export function legendRowsFor(layer) {
   const swatch = layer.kind === 'line' ? 'line' : layer.kind === 'point' ? 'point' : 'polygon';
   const layerIcon = layer.kind === 'point' ? (style.icon ?? '') : '';
   const layerDash = layer.kind === 'point' ? '' : (style.dash ?? 'solid');
+  const layerWidth = baseWidthOf(style);
 
   /**
-   * A row draws the same mark the map does — same icon, same pattern.
-   * Only points carry icons and only line work carries a pattern, because
-   * that is all the map itself does with them.
+   * A row draws the same mark the map does — same icon, same pattern, same
+   * weight. Only points carry icons and only line work carries a pattern and
+   * a thickness, because that is all the map itself does with them.
    */
   const mark = (extra = {}) => {
     if (layer.kind === 'point') {
       const icon = extra.icon || layerIcon;
       return { swatch, ...(icon ? { icon } : {}) };
     }
-    return { swatch, dash: extra.dash || layerDash };
+    const row = { swatch, dash: extra.dash || layerDash };
+    // A trunk road is heavier than a service road on the map, so it has to be
+    // heavier in the key as well — a legend that flattens them is telling the
+    // reader the map does not distinguish them.
+    if (layer.kind === 'line') row.width = extra.width ?? layerWidth;
+    return row;
   };
 
   if (!sym || sym.mode === 'single') {
@@ -365,7 +417,7 @@ export function legendRowsFor(layer) {
 
   if (sym.mode === 'categorised') {
     const rows = sym.categories.map((c) => ({
-      label: c.label, color: c.color, ...mark({ icon: c.icon, dash: c.dash }),
+      label: c.label, color: c.color, ...mark({ icon: c.icon, dash: c.dash, width: c.width }),
     }));
     if (sym.other?.include) rows.push({ label: sym.other.label, color: sym.other.color, ...mark() });
     return rows;

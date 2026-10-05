@@ -42,11 +42,70 @@ artistic, vintage, topographic, 3-D and editorial. A template is a complete
 opening position: basemap, look filter, page size, and every element already
 placed. Everything stays editable afterwards.
 
-**Study areas.** Search a country, state, LGA, city or any named place. The
-real administrative outline is fetched from OpenStreetMap, drawn on the map,
-and becomes the region every data fetch and analysis job works inside.
+**Twelve basemaps**, in four families — *Vector* (Liberty, Bright, Minimal),
+*Imagery* (Satellite, Satellite with labels, Streets), *Terrain*
+(Topographic, OpenTopoMap, Shaded relief) and *Canvas* (Light, Dark, Ocean).
+The basemap is its own section in the Templates panel rather than a line
+inside "Map look", because it is the largest single decision about what the
+map shows, and satellite imagery is what most people open a cartography tool
+looking for.
 
-**Open data, segmented.** Thirty-nine datasets described in plain English,
+The two kinds behave differently and the panel says so. A **vector** basemap
+is real layers, so the plain-English toggles — roads, water, buildings,
+labels — can hide families of them. A **raster** basemap is finished pictures,
+so nothing inside a tile can be switched off; the toggles are replaced by a
+note explaining that, instead of sitting there doing nothing as they used to.
+Each basemap carries its own credit, and that credit is what prints: a
+satellite map crediting OpenFreeMap is a false statement, and it is the kind
+that gets a printed map into trouble.
+
+**Study areas — one, or several.** Search a country, state, LGA, city or any
+named place. The real administrative outline is fetched from OpenStreetMap,
+drawn on the map, and becomes the region every data fetch and analysis job
+works inside.
+
+**Geopolitical zones.** Nigeria's six — North Central, North East, North
+West, South East, South South, South West — as a level of their own. A zone is
+not an administrative unit and OpenStreetMap has no boundary relation for one,
+so it is assembled from its states' real outlines and dissolved into a single
+region: South East comes out as 28,765 km², measured from the geometry rather
+than quoted. The states ride along as `parts`, which means a zone behaves like
+any other multi-area study region — data is fetched per state on its own
+bounding box rather than over one rectangle spanning the whole zone.
+
+**LGAs, picked from a list.** Choosing *LGA / District* now asks for the state
+first and then offers the LGAs actually inside it — Lagos returns its 20, with
+real polygons and real areas attached. This replaced a text box, which worked
+if you already knew the answer and did not otherwise: not everyone has 774
+LGA names to hand, or knows whether the one they want is spelled "Ogun
+Waterside" or "Ogun-Waterside".
+
+Nominatim can find a named place but cannot list what is inside one, so the
+list comes from OpenStreetMap's boundary relations through Overpass — the same
+boundaries most published Nigerian LGA shapefiles are derived from. Membership
+is decided on each unit's **centroid**, not on whether it touches the state:
+the bounding box around Kaduna clips into six of its neighbours, and listing
+them under Kaduna would be wrong in a way you cannot see. The whole list is
+fetched once, with outlines attached, and goes through the same cache as
+everything else — so the second look at a state is instant, and so is the
+first if someone else has already opened it.
+
+A map is often not about one administrative unit — a catchment crosses three
+LGAs, a corridor study covers the states along it — so *Add this area* puts
+another one alongside rather than replacing it. Every outline stays on the
+map, and the title, the figures, the analysis and the clipping all cover the
+whole set.
+
+Each area is fetched **separately**, on its own bounding box, and the results
+are merged. That matters: one box drawn around Lagos and Kano is most of
+southern Nigeria, which no public Overpass will answer and none of which the
+map is about. Areas may overlap — an LGA inside a state you also added is a
+reasonable thing to want — so a feature returned by two of them is dropped
+once, by its OpenStreetMap id, and the total area is the **union** of the
+outlines rather than the sum: adding Ikeja to Lagos State leaves the printed
+figure at 3,723 km², not 3,772.
+
+**Open data, segmented.** Thirty-eight datasets described in plain English,
 across roads and transport, water and nature, buildings and places, services
 and facilities, land use, and industry and hazard.
 
@@ -89,7 +148,7 @@ below zoom 14 and buildings lose 95% of themselves by zoom 12. Overture is
 always a supplement, never a requirement: if it is unavailable or the area is
 too large for it, the dataset is still the dataset, from OpenStreetMap alone.
 
-Thirty-one of them come in meaningful types and arrive already split: roads
+Thirty of them come in meaningful types and arrive already split: roads
 by class (trunk, primary, secondary, then tertiary,
 residential, service and track), health facilities by kind (hospital, clinic,
 doctor, pharmacy, dentist), schools by level, airports by part, places of
@@ -127,6 +186,25 @@ neatline. Drag them anywhere inside the page frame, with snap guides to the
 page and to each other. The legend, key figures, map information and scale
 bar read the live document, so they stay correct as data and analysis change.
 
+**A locator inset that locates something.** It used to draw the study area's
+outline alone, which answers nothing: the shape of Eti Osa means nothing to
+anyone who does not already know where Eti Osa is, and that is exactly the
+reader an inset is for. It now draws the study area *inside* the next
+recognisable thing up — an LGA in its state, a state in its geopolitical zone,
+a zone in the country — with one shared projection, so the study area sits
+where it really sits rather than being re-centred to fill the box. Set it to
+*Country* or *None* if you want something else, tick **Mark the map view** to
+add a rectangle showing where the main map is currently looking, and colour
+the region and the study area separately.
+
+Two bugs went with the rewrite. The preview used a square viewBox stretched
+with `preserveAspectRatio="none"`, so every outline on screen was squashed by
+exactly the amount the element was off square — and then printed correctly, so
+preview and print disagreed. The element is now measured with
+`getBoundingClientRect` (not `clientWidth`, which rounds to whole pixels and
+was leaving the aspect 1.5% out) and both renderers work from one geometry
+pass, so they cannot diverge again.
+
 **Alignment.** Two ways, depending on whether you are placing one thing or
 tidying several:
 
@@ -158,6 +236,40 @@ will not evaluate per feature, so a layer whose classes want different
 patterns quietly becomes several filtered map layers; the panel just shows
 one line per class.
 
+**Line thickness in millimetres**, the way a desktop GIS states one. Roads,
+rivers, railways and pipelines get a *Line thickness* field of their own — not
+the outline-width control a polygon uses, because on a line layer the stroke
+is the subject rather than an edge around one. Type a number, pick the unit:
+**mm, cm, inches or points**. Changing the unit re-expresses the same line
+rather than changing it, so 0.45 mm becomes 1.3 pt and stays the same road.
+
+All four are units of the **printed page**, and screen pixels are deliberately
+not on the list: a pixel is not a size, it is a count. A "2 pixel" road is a
+different road on a laptop, on a phone and on an A0 plot, whereas 0.5 mm is
+half a millimetre on all three. The artboard knows how many screen pixels a
+millimetre of paper currently occupies, so the preview is drawn at the weight
+that prints, and the export at 96 or 600 dpi puts down exactly the millimetres
+you asked for.
+
+One consequence worth stating plainly: **thickness no longer changes with
+zoom.** A 0.5 mm road is 0.5 mm zoomed in and 0.5 mm zoomed out, which is what
+a cartographer means by a line weight. Zooming out shows more roads, not
+thinner ones.
+
+Datasets arrive with the hierarchy a printed road map has — trunk 0.8 mm,
+primary 0.65, secondary 0.5, down to service and track at 0.25 — and changing
+the layer thickness scales the whole set **in proportion**, so the order
+survives instead of every class flattening onto one number. Any single class
+can then be set on its own from its legend row.
+
+The width is stored as millimetres and converted to pixels at draw time. It
+used to be stored the other way round — as a baked MapLibre expression — which
+is why the width control used to erase a road layer's whole hierarchy the
+first time anyone touched it: a stored expression is write-only, since the
+panel cannot tell `1.8` from `['interpolate', …]` and could only replace it.
+The legend follows the same weights, so a trunk road is heavier than a service
+road in the printed key as well.
+
 **An editable legend.** Select the legend on the page and every row is there
 to edit: its colour, its symbol, its line pattern, and the words beside it.
 Rename *Primary* to "Primary highway", give hospitals a different colour, put
@@ -181,6 +293,31 @@ using.
 CSS custom properties, so the theme is a token swap rather than a second
 stylesheet. Toggle in the header or on the home page; with no stored choice the
 app follows your operating system.
+
+**Row actions that do not squeeze the name.** The Elements and Layers lists
+carry six actions a row — show, lock, duplicate, forward, backward, delete —
+and the side panel is a fixed ~280 px at every desktop width. In the flow
+those buttons left about 25 px for the name, which is the one part of a row
+that says which element it is. They now float over the end of the row and
+appear on hover or keyboard focus, so the name gets the full width while you
+are reading and the buttons are there when you reach for them. A pointer that
+cannot hover has nothing to reveal them, so on touch they come back into the
+flow on a line of their own — keyed on hover rather than on window width,
+because a touchscreen laptop has a wide window and no hover.
+
+Names are truncated by the browser with an ellipsis at whatever width the
+panel happens to be, and the full text stays in the tooltip. They used to be
+cut in JavaScript at 32 characters, which is a guess about the panel width
+that is wrong at every width.
+
+The action icons are drawn, not typed. They were emoji — 👁 🔒 ⧉ ▲ ▼ — which
+are colour glyphs from a font the operating system picks: a different size and
+weight on every machine, unable to take the row's ink colour, and ⧉ simply
+missing on Windows. They are now one SVG set on a 24×24 grid at a single
+stroke weight in `currentColor`, so hover and active states need no second
+asset. A hidden element keeps a struck-through eye and a locked one a closed
+padlock, lit and `aria-pressed`, so the button reports which state the element
+is in rather than only what clicking does.
 
 **Three shapes, not one that squeezes.** On a wide screen the tool rail, the
 left panel, the map and the inspector sit side by side. Narrower, the
@@ -213,17 +350,42 @@ your data files are never uploaded. The reference backend is ~60 lines in
 *Large format* (A2, A1, **A0**, B1, ARCH D, ARCH E, Poster 24×36) needs a
 plotter; *Screen* covers social and presentation shapes.
 
-**Export.** PNG or single-page PDF at the exact paper size, at 96, 150 or
-300 dpi. The export crops the live map to the page frame, re-applies the
-template's look filter and paper texture, and repaints every element with
-canvas renderers that mirror the on-screen ones.
+**Export.** PNG or single-page PDF at the exact paper size, at **96, 150, 300,
+450 or 600 dpi** — Screen, Standard, Print, Fine or Very fine. Page setup
+names each one by what it is for and shows the pixel dimensions you will get
+before you commit to them.
+
+**The map is redrawn at the export's own resolution.** This is the difference
+between a printed map that holds up and one that does not, and it is what
+used to make a 300 dpi export look no sharper than a screenshot. The
+on-screen canvas is drawn at the screen's pixel density — perhaps 800 device
+pixels across the page frame — while an A4 export at 300 dpi is 2,480 pixels
+wide. Scaling the first up to the second is a 3× enlargement of a raster, and
+it looks like one: soft coastlines, mushy labels, stepped road edges. Turning
+the dpi up made the file bigger and the map no sharper, because the extra
+pixels were interpolated rather than drawn.
+
+So the export builds a second map off-screen, at the same CSS size and the
+same camera but a higher pixel ratio, and draws the view again for real —
+vector tiles re-tessellated, glyphs re-rasterised, sprites re-sampled. Same
+CSS size is the important half: it keeps the projection, and therefore the
+ground shown and the page crop, identical to what you were looking at. Only
+the pixel density changes. If the machine will not give up a second WebGL
+context, or the drawing buffer would exceed the driver's maximum texture
+size, it falls back to the screen canvas — which is exactly what this
+pipeline did in every case before.
+
+PDFs embed the page losslessly up to 40 megapixels. JPEG subsampling is kind
+to photographs and unkind to maps — it is the colour channels it discards,
+and a map is thin coloured lines on a pale ground — so it is only used above
+that, where a lossless plotter-sized page would run to hundreds of megabytes.
 
 At plotter sizes the requested resolution is not always achievable — a
 browser cannot allocate the 139-megapixel canvas that A0 at 300 dpi needs — so
 page setup tells you the resolution you will actually get *before* you export,
-rather than silently downscaling: "A0 is too big for 300 dpi in a browser —
-the export will be 278 dpi (120 megapixels)". A1 and below print at the full
-300.
+rather than silently downscaling: "A0 is too big for 600 dpi in a browser —
+the export will be 278 dpi (9,205 × 13,013 px)". A1 and below print at the
+full 300; A4 and A3 take 600 comfortably.
 
 **A project library.** Maps accumulate rather than overwrite. Save (⤓ in the
 header, or Ctrl+S) files the current map into your projects with a thumbnail
@@ -246,7 +408,8 @@ simulated data anywhere.
   estimate, not a survey, and it is labelled as such in the result, the
   summary and the printed credits.
 - **Study-area figures** come from the mapped administrative outline, not
-  from a cadastral source.
+  from a cadastral source. With several areas the figure is their dissolved
+  union, so shared ground is counted once.
 - **Feature counts** come from OpenStreetMap, which is community-mapped and
   uneven in coverage — absence of features is not evidence of absence.
 
@@ -257,9 +420,12 @@ src/
 ├── main.js              entry point; landing ⇄ studio, boot order
 ├── core/                constants, DOM helpers, geo maths, map controller,
 │                        store (state + pub/sub + undo + project library), toasts
-├── data/                Nominatim boundaries, the dataset catalogue, the
-│                        Overture→OSM supplement table, Overpass client,
-│                        Overture PMTiles client, browser-side file parsing
+├── data/                Nominatim boundaries, admin children (LGAs) and
+│                        geopolitical zones, the study-area list and its
+│                        combined view, locator-inset context, the dataset
+│                        catalogue, the Overture→OSM supplement table,
+│                        Overpass client, Overture PMTiles client,
+│                        browser-side file parsing
 ├── layers/              registry (one ordered list of everything drawn),
 │                        render (projects the registry onto MapLibre),
 │                        symbology (mode → paint expression + legend),
@@ -272,7 +438,7 @@ src/
 ├── export/              crop, filter, texture and element compositing
 ├── ui/                  landing, studio chrome, theme, artboard interaction,
 │                        inspector, legend editor (rows → symbology writes),
-│                        and one module per left-hand panel
+│                        interface icons, and one module per left-hand panel
 └── styles/              light/dark tokens, landing, studio, CSS thumbnails
 
 src/data/cache/          the layered geodata cache (see below)
@@ -289,6 +455,14 @@ Two rules hold the thing together:
    `subscribe()` to the keys they care about. That is what keeps the panels,
    the map and the export from drifting apart the way they did in the v2
    prototype (kept for reference in [`legacy/`](legacy/v2-prototype.html)).
+
+   The study-area list is the one place this needed care. `studyAreas` is the
+   source of truth and `studyArea` is its combined view, and the two are
+   written together in a single `set()` by
+   [`src/data/study-areas.js`](src/data/study-areas.js) — so a subscriber
+   watching either one never sees them disagree, and the dozen modules that
+   only ever wanted "the study area" did not have to learn there are now
+   several.
 2. **Every element type is defined once**, in
    [`src/layout/elements.js`](src/layout/elements.js), with its screen
    renderer and its canvas renderer side by side. What you drag is what
@@ -377,6 +551,51 @@ A full national run still takes hours; start it and walk away.
 `--status` prints coverage by region, which is the practical way to see where
 a long run got to.
 
+### Running the database in Docker
+
+The data cannot live in git. The built database is ~140 MB and the extract it
+comes from is ~700 MB, so both are gitignored — which leaves the question of
+how anyone else gets them. The answer is a container: the repository carries
+the code that *builds* the database, and the database itself travels as a
+Docker volume or an image.
+
+```bash
+docker compose up -d cache
+```
+
+That serves the cache on `:8788`, exactly where the dev server's `/api/cache`
+proxy already points — so `npm run dev` needs no change and cannot tell
+whether the cache is running in Docker or on the host.
+
+Everything else is a one-shot command against the same volume:
+
+```bash
+docker compose run --rm fetch                        # download the extract
+docker compose run --rm import --nigeria --no-heavy  # build the database
+docker compose run --rm backup                       # copy it out to ./server/data
+docker compose run --rm restore                      # load a copy someone sent you
+```
+
+Use `EXTRACT_FILE=somewhere-latest.osm.pbf` to point the importer at a
+different extract. It is set as an environment variable rather than passed as
+`--pbf /extracts/...` because Git Bash rewrites arguments that look like Unix
+paths into Windows ones before Docker sees them.
+
+**Handing the database to someone else.** `backup` writes a single verified
+file via `VACUUM INTO` — which folds in the write-ahead log, so unlike `cp` it
+cannot hand over a database that is quietly missing recent writes. Send them
+that file; they drop it in `./server/data` and run `restore`. For a team,
+push the image to a registry instead — GitHub Container Registry takes what
+the repository will not:
+
+```bash
+docker build -t ghcr.io/<you>/gis-geodata:latest .
+docker push ghcr.io/<you>/gis-geodata:latest
+```
+
+The image holds only the server and the catalogue; the data stays on the
+volume, so rebuilding the image never disturbs it.
+
 ### Importing a whole country at once
 
 Prefetching through Overpass works, but it is the slow road: thousands of
@@ -413,10 +632,10 @@ behind it. Rather than hold a country's nodes in memory, the import makes
 three streaming passes — ways and relations, then member ways, then node
 locations — keeping ids and coordinates in sorted typed arrays.
 
-**The heavy three are excluded above and that is deliberate.** Building
-footprints, local roads and land use together match more ways than a V8 `Map`
-can hold (~16.7M entries), and a state's worth of building polygons is more
-than the map can draw in any case. Import them per city or LGA instead:
+**The heavy datasets are excluded above and that is deliberate.** Building
+footprints and local roads together match more ways than a V8 `Map` can hold
+(~16.7M entries), and a state's worth of building polygons is more than the
+map can draw in any case. Import them per city or LGA instead:
 
 ```bash
 npm run import -- --areas "Kano, Nigeria" --datasets buildings
@@ -463,10 +682,22 @@ DuckDB over Overture's S3 parquet.
 
 ## Attribution
 
-Basemap © OpenFreeMap / OpenMapTiles / OpenStreetMap contributors ·
 Boundaries via Nominatim · Feature data © OpenStreetMap contributors ·
 Overture Maps data © Overture Maps Foundation, drawn from OpenStreetMap
 (ODbL), Google Open Buildings, Microsoft and Esri.
+
+The basemap credit is composed per basemap and printed on the map — the
+vector styles are © OpenFreeMap / OpenMapTiles / OpenStreetMap contributors,
+the imagery, terrain and canvas tiles are © Esri and its data partners, and
+OpenTopoMap is CC-BY-SA over OpenStreetMap data (ODbL).
+
+**On the Esri tiles.** They are served without a key and are what the Esri
+Leaflet examples point at, which makes them right for demo, evaluation and
+internal work. They are not unconditional: Esri's terms govern their use, and
+a commercial or high-volume deployment should hold an ArcGIS subscription or
+point `BASEMAPS` in [`src/core/constants.js`](src/core/constants.js) at its
+own tile service. OpenTopoMap likewise asks that heavy users run their own
+instance. The vector styles have no such condition.
 
 The Overture credit is added to the printed map only when a map actually
 carries an Overture layer.

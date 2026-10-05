@@ -11,6 +11,7 @@ import { boundsFromBbox, formatNumber } from '../../core/geo.js';
 import { renderElements } from '../artboard.js';
 import { setTool } from '../tool.js';
 import { head, section, row, empty, miniBtn, button } from '../controls.js';
+import { uiIcon } from '../ui-icons.js';
 import { iconSvg } from '../../layers/icons.js';
 import { dashArray, isTransparent } from '../../layers/symbology.js';
 
@@ -68,15 +69,18 @@ function layerMark(layer) {
 }
 
 function layerRow(layer) {
+  // The same drawn set the Elements list uses — these two panels are the same
+  // widget doing the same job, and two different icon vocabularies for "hide"
+  // in one sidebar is how an interface stops looking designed.
   const actions = [
-    miniBtn(layer.visible ? '👁' : '◌', layer.visible ? 'Hide' : 'Show', () => {
+    miniBtn(uiIcon(layer.visible ? 'show' : 'hide'), layer.visible ? 'Hide this layer' : 'Show this layer', () => {
       toggleLayer(layer.id);
       renderElements();
-    }),
-    miniBtn('▲', 'Move up', () => reorderLayer(layer.id, 1)),
-    miniBtn('▼', 'Move down', () => reorderLayer(layer.id, -1)),
-    miniBtn('⌖', 'Zoom to this layer', () => layer.bbox && flyToBounds(boundsFromBbox(layer.bbox))),
-    miniBtn('✕', 'Remove', () => { removeLayer(layer.id); renderElements(); }),
+    }, { pressed: !layer.visible }),
+    miniBtn(uiIcon('forward'), 'Move up', () => reorderLayer(layer.id, 1)),
+    miniBtn(uiIcon('backward'), 'Move down', () => reorderLayer(layer.id, -1)),
+    miniBtn(uiIcon('target'), 'Zoom to this layer', () => layer.bbox && flyToBounds(boundsFromBbox(layer.bbox))),
+    miniBtn(uiIcon('trash'), 'Remove', () => { removeLayer(layer.id); renderElements(); }, { danger: true }),
   ];
 
   const count = layer.meta?.count;

@@ -123,11 +123,6 @@ function settings() {
     labelled('Backend URL', textInput(aiEndpoint(), (value) => setAiEndpoint(value.trim()), {
       placeholder: 'http://localhost:8787',
     }), 'The small server that holds your API key.'),
-    el('p', {
-      style: { margin: 0, fontSize: '10.5px', lineHeight: '1.55', color: 'var(--ink-faint)' },
-      html: 'An API key must never sit in a browser — anyone opening dev tools would have it. So the studio talks to a backend you run, and that process holds the credential. A ready-made one ships with this project:<br><br>'
-        + '<code style="font-family:ui-monospace,monospace;font-size:11px;display:block;padding:6px 8px;background:var(--surface-2);border-radius:6px;border:1px solid var(--line)">ANTHROPIC_API_KEY=sk-… node server/ai-backend.mjs</code>',
-    }),
   ]), !aiConfigured());
 }
 

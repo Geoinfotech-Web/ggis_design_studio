@@ -5,7 +5,7 @@
 
 import { FONTS } from '../core/constants.js';
 import { drawIcon } from '../layers/icons.js';
-import { dashArray, isTransparent } from '../layers/symbology.js';
+import { dashArray, isTransparent, swatchStroke } from '../layers/symbology.js';
 
 /** #rrggbb + alpha → rgba() */
 export function rgba(hex, alpha = 1) {
@@ -124,7 +124,7 @@ export function drawLine(ctx, text, x, y, maxWidth, opts) {
 /**
  * A legend/stat swatch: filled square, line stroke, point dot — or the very
  * icon and line pattern the map is drawing, when the row carries one.
- * @param {{icon?:string, dash?:string}} [mark]
+ * @param {{icon?:string, dash?:string, width?:number}} [mark]
  */
 export function drawSwatch(ctx, kind, x, y, size, color, mark = {}) {
   // The printed twin of the hollow swatch in elements.js — an outline where
@@ -154,7 +154,7 @@ export function drawSwatch(ctx, kind, x, y, size, color, mark = {}) {
   ctx.fillStyle = color;
   ctx.strokeStyle = color;
   if (kind === 'line') {
-    const w = Math.max(1, size * 0.26);
+    const w = Math.max(1, swatchStroke(size, mark.width));
     const pattern = dashArray(mark.dash);
     ctx.lineWidth = w;
     // Dash lengths are in line widths on the map; scaling them by the swatch

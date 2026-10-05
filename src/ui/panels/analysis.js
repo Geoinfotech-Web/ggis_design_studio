@@ -16,6 +16,7 @@ import {
   head, section, row, empty, button, stack, labelled, select,
   slider, miniBtn, pillRow, inline,
 } from '../controls.js';
+import { uiIcon } from '../ui-icons.js';
 
 let pane;
 let category = 'proximity';
@@ -183,7 +184,7 @@ function resultsSection() {
         el('div', { text: r.result.name, style: { fontSize: '12.5px', fontWeight: '700' } }),
         el('div', { text: r.result.summary, style: { fontSize: '11px', color: 'var(--ink-soft)', lineHeight: '1.4', marginTop: '2px' } }),
       ]),
-      miniBtn('✕', 'Remove this result', () => removeRun(r.tool.id)),
+      miniBtn(uiIcon('trash'), 'Remove this result', () => removeRun(r.tool.id), { danger: true }),
     ]),
   ]))));
 }
@@ -204,12 +205,6 @@ export function render() {
     pillRow(TOOL_CATEGORIES, category, (id) => { category = id; render(); }),
     el('div', { style: { padding: '4px 14px 12px' } }, toolsInCategory(category).map(toolCard)),
     resultsSection(),
-    el('div.panel-section', {}, [
-      el('p', {
-        style: { margin: 0, fontSize: '10.5px', lineHeight: '1.5', color: 'var(--ink-faint)' },
-        html: 'These are real measurements taken from your layer geometry — areas and lengths are computed on the ellipsoid, distances are straight-line. Volume is area × the depth you enter, which is a planning estimate rather than a survey.',
-      }),
-    ]),
   ]);
 }
 

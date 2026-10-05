@@ -17,7 +17,13 @@ import { fileURLToPath } from 'node:url';
 import { normBbox } from '../src/data/cache/key.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const CACHE_PATH = resolve(HERE, 'data', 'regions.json');
+/**
+ * In a container the default sits inside the image, where it is discarded the
+ * moment the run ends — so every import would re-geocode all 37 states. The
+ * override points it at the same volume as the database, which is the only
+ * thing that outlives the container.
+ */
+const CACHE_PATH = process.env.REGIONS_CACHE ?? resolve(HERE, 'data', 'regions.json');
 
 const USER_AGENT = 'gis-design-studio-import/1.0 (+https://github.com/JohnEdet12)';
 const NOMINATIM = 'https://nominatim.openstreetmap.org/search';

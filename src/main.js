@@ -19,7 +19,8 @@ import {
   applyLook, applyTerrain, applyBuildingExtrusion, applyBasemapGroups,
 } from './core/map.js';
 import { initLayerRendering } from './layers/render.js';
-import { addVectorLayer, findBySource } from './layers/registry.js';
+import { findBySource } from './layers/registry.js';
+import { combineAreas, redrawBoundaries } from './data/study-areas.js';
 import { boundsFromBbox } from './core/geo.js';
 
 import { applyTemplate, reapplyMapState, watchBuildings3d } from './templates/apply.js';
@@ -86,7 +87,7 @@ function initStudio() {
   subscribe(['basemapGroups'], () => applyBasemapGroups(state.basemapGroups));
 
   // Anything that changes what the page should say redraws the elements.
-  subscribe(['elements', 'layers', 'studyArea', 'analysisRuns', 'page', 'templateId', 'selectedElementId'], renderElements);
+  subscribe(['elements', 'layers', 'studyArea', 'analysisRuns', 'page', 'templateId', 'selectedElementId', 'insetContext'], renderElements);
 
   // The scale bar, north arrow and map-information block all depend on the
   // camera, so they refresh (cheaply) after the map settles.
@@ -141,6 +142,7 @@ function resetDocument() {
     layers: [],
     elements: [],
     analysisRuns: [],
+    studyAreas: [],
     studyArea: null,
     selectedElementId: null,
     selectedLayerId: null,
@@ -186,28 +188,24 @@ function openProject(id) {
 function restoreProject(doc, projectId = null) {
   showStudio();
   resetDocument();
-  set({ ...doc, projectId, selectedElementId: null, selectedLayerId: null }, { history: false });
 
-  // Layers are not persisted, but the study-area outline can be rebuilt
-  // from the saved boundary so the map does not come back empty.
-  if (doc.studyArea?.geojson && !findBySource('boundary').length) {
-    addVectorLayer({
-      name: `${doc.studyArea.name} boundary`,
-      source: 'boundary',
-      geojson: doc.studyArea.geojson,
-      kind: 'polygon',
-      color: '#0369a1',
-      style: { fillOpacity: 0.07, strokeWidth: 2.2, stroke: '#0369a1' },
-      meta: { slug: 'study-area', level: doc.studyArea.level },
-    });
-  }
+  // Projects saved before a map could have several areas carry a single
+  // `studyArea`; it becomes a list of one, which is the same map.
+  const areas = doc.studyAreas?.length ? doc.studyAreas : (doc.studyArea ? [doc.studyArea] : []);
+  const { studyArea, studyAreas, ...rest } = doc;
+  set({ ...rest, projectId, selectedElementId: null, selectedLayerId: null }, { history: false });
+  set({ studyAreas: areas, studyArea: combineAreas(areas) }, { history: false });
+
+  // Layers are not persisted, but the study-area outlines can be rebuilt from
+  // the saved boundaries so the map does not come back empty.
+  if (areas.length && !findBySource('boundary').length) redrawBoundaries();
 
   const name = $('#project-name');
   if (name) name.value = state.projectName;
 
   reapplyMapState();
   if (doc.mapView) flyTo(doc.mapView);
-  else if (doc.studyArea?.bbox) flyToBounds(boundsFromBbox(doc.studyArea.bbox));
+  else if (state.studyArea?.bbox) flyToBounds(boundsFromBbox(state.studyArea.bbox));
 
   layoutArtboard();
   renderElements();

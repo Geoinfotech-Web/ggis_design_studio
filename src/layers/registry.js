@@ -8,7 +8,7 @@
 import { state, set, touch } from '../core/store.js';
 import { uid } from '../core/dom.js';
 import { dominantGeometry, featureCount, bboxOf } from '../core/geo.js';
-import { singleSymbology, paintColor, legendRowsFor, shade } from './symbology.js';
+import { singleSymbology, paintColor, legendRowsFor, shade, DEFAULT_LINE_WIDTH_MM } from './symbology.js';
 
 export { shade };
 
@@ -19,6 +19,11 @@ export function defaultStyle(kind, color = '#0369a1') {
     fillOpacity: kind === 'polygon' ? 0.35 : 0,
     stroke: kind === 'polygon' ? shade(color, -0.25) : color,
     strokeWidth: kind === 'line' ? 1.6 : 1.2,
+    // Line work carries its own thickness, separate from the outline width a
+    // polygon or a point uses, because on a line layer it is the subject
+    // rather than an edge around one. Millimetres of printed page;
+    // layers/render.js converts to the pixels the map paints in.
+    ...(kind === 'line' ? { widthMm: DEFAULT_LINE_WIDTH_MM } : {}),
     strokeOpacity: 1,
     dash: 'solid',            // a LINE_STYLES id
     icon: '',                 // point symbol id, '' for a plain circle

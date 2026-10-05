@@ -10,7 +10,7 @@
 import { $, $$, el, fill, debounce } from '../core/dom.js';
 import { state, set, subscribe, undo, redo, canUndo, canRedo, saveProject, hasWork } from '../core/store.js';
 import { notify } from '../core/toast.js';
-import { APP, BASEMAPS, ATTRIBUTION_TEXT } from '../core/constants.js';
+import { APP, BASEMAPS, attributionFor, PAPER_SIZES, paperDimsLabel } from '../core/constants.js';
 import { setBasemap, flyToBounds, getMap, resizeSoon } from '../core/map.js';
 import { boundsFromBbox, formatArea } from '../core/geo.js';
 import { exportPng, exportPdf, thumbnailDataUrl } from '../export/render.js';
@@ -123,12 +123,25 @@ function renderMapControls() {
   const host = $('#map-controls');
   if (!host) return;
 
-  const basemapCard = el('div.control-card', {}, Object.entries(BASEMAPS).map(([key, base]) => {
+  // Twelve basemaps is too many to park on the map as a row of buttons, so
+  // this card carries the handful you switch between while working — one
+  // quiet, one detailed, one photographic — and the full grouped list lives in
+  // the Templates panel where the rest of the map's appearance is decided.
+  const QUICK = ['positron', 'liberty', 'satellite-labels'];
+  const basemapCard = el('div.control-card', {}, QUICK.map((key) => {
+    const base = BASEMAPS[key];
     const btn = el('button.control-btn', { type: 'button', text: base.label, title: base.hint });
     btn.classList.toggle('is-active', state.basemap === key);
     btn.addEventListener('click', () => setBasemap(key));
     return btn;
-  }));
+  }).concat((() => {
+    const btn = el('button.control-btn', {
+      type: 'button', text: 'More…', title: 'Every basemap, in the Templates panel',
+    });
+    btn.classList.toggle('is-active', !QUICK.includes(state.basemap));
+    btn.addEventListener('click', () => setTool('templates'));
+    return btn;
+  })()));
 
   const viewCard = el('div.control-card', {}, [
     (() => {
@@ -155,13 +168,14 @@ function renderMapControls() {
 function renderFooter() {
   const footer = $('#studio-footer');
   if (!footer) return;
-  const { wIn, hIn, label } = paperDims();
+  const { label, orientation } = paperDims();
+  const paper = PAPER_SIZES[state.page.size] ?? PAPER_SIZES.a4;
   const bits = [
     `${APP.name} ${APP.version}`,
-    `${label} · ${wIn.toFixed(1)}″ × ${hIn.toFixed(1)}″ · ${state.page.dpi} dpi`,
+    `${label} · ${paperDimsLabel(paper, orientation === 'portrait')} · ${state.page.dpi} dpi`,
     state.studyArea ? `${state.studyArea.name} · ${formatArea(state.studyArea.areaKm2)}` : 'No study area',
     `${state.layers.length} layer${state.layers.length === 1 ? '' : 's'}`,
-    ATTRIBUTION_TEXT,
+    attributionFor(state.basemap),
   ];
   fill(footer, bits.flatMap((text, i) => [
     i ? el('span.sep', { text: '·' }) : null,
@@ -190,7 +204,7 @@ async function runExport(kind) {
   try {
     const fn = kind === 'pdf' ? exportPdf : exportPng;
     const out = await fn({ onProgress: (msg) => status.update(msg) });
-    status.update(`<b>${kind.toUpperCase()} saved</b> — ${out.width} × ${out.height} px`, { tone: 'ok', duration: 5000 });
+    status.update(`<b>${kind.toUpperCase()} saved</b> — ${out.width} × ${out.height} px at ${state.page.dpi} dpi`, { tone: 'ok', duration: 5000 });
   } catch (err) {
     console.error(err);
     status.update(`Export failed: ${err.message}`, { tone: 'error', duration: 8000 });

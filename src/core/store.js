@@ -31,8 +31,16 @@ export const state = {
 
   page: { size: 'a4', orientation: 'portrait', dpi: 150, background: '#ffffff' },
 
-  studyArea: null,                     // { name, level, geojson, bbox, areaKm2 }
+  // The areas this map is about, and the combined view of them that the rest
+  // of the app reads. Both are written together by data/study-areas.js —
+  // never assign either one directly.
+  studyAreas: [],                      // [{ name, level, geojson, bbox, areaKm2 }]
+  studyArea: null,                     // the same shape, covering all of them
   clipToArea: true,                    // trim open data to the boundary, not the bbox
+  // Bumped when a locator-inset context outline finishes loading. A counter,
+  // not the outline: several insets can want different ones, and each looks
+  // its own up. See data/inset-context.js.
+  insetContext: 0,
 
   layers: [],                          // see layers/registry.js
   elements: [],                        // see layout/elements.js
@@ -142,7 +150,7 @@ const LIBRARY_KEY = 'gds.projects.v3';
 const LEGACY_KEY = 'gds.project.v3';      // the old single-slot format
 const PERSIST_KEYS = [
   'projectName', 'templateId', 'basemap', 'basemapGroups', 'mapView', 'terrain',
-  'buildings3d', 'mapLook', 'page', 'elements', 'studyArea', 'clipToArea',
+  'buildings3d', 'mapLook', 'page', 'elements', 'studyAreas', 'clipToArea',
 ];
 
 /** Beyond this the oldest project is dropped — localStorage is finite. */

@@ -18,7 +18,9 @@
 
 import { getMap, onStyleReady } from '../core/map.js';
 import { state, subscribe } from '../core/store.js';
-import { dashArray, dashGroups, iconImage, hasCategoryIcons, cssColor } from './symbology.js';
+import { pagePxPerMm } from '../ui/artboard.js';
+import { debounce } from '../core/dom.js';
+import { dashArray, dashGroups, iconImage, hasCategoryIcons, cssColor, lineWidth, baseWidthOf } from './symbology.js';
 import { ensureIconImage, isIcon } from './icons.js';
 
 const PREFIX = 'gds-ov-';
@@ -140,6 +142,23 @@ function addLines(map, layer, srcId, before) {
   const groups = dashGroups(sym, s.dash ?? 'solid');
   const covered = groups.flatMap((g) => g.values ?? []);
 
+  /**
+   * Line work gets the class-weighted width in millimetres of paper, turned
+   * into pixels here; a polygon's outline gets the plain number it has always
+   * had.
+   *
+   * Converted here rather than stored so that `style.widthMm` can stay a
+   * number the thickness field reads back and the user can type into. A
+   * stored pixel count is write-only twice over — the panel cannot tell 1.8
+   * from ['interpolate', …], so it could only replace it, which is what used
+   * to flatten a road layer's class hierarchy the first time anyone touched
+   * the width; and a pixel count silently means something different on the
+   * next screen or paper size.
+   */
+  const width = layer.kind === 'line'
+    ? lineWidth(sym, baseWidthOf(s), pagePxPerMm())
+    : (typeof s.strokeWidth === 'number' ? s.strokeWidth : 1.4);
+
   groups.forEach((group, i) => {
     const dash = dashArray(group.dash);
     const filter = group.rest ? classFilter(sym.field, covered, true)
@@ -159,7 +178,7 @@ function addLines(map, layer, srcId, before) {
       },
       paint: {
         'line-color': cssColor(s.stroke),
-        'line-width': s.strokeWidth ?? 1.4,
+        'line-width': width,
         'line-opacity': (s.strokeOpacity ?? 1) * (layer.opacity ?? 1),
         ...(dash ? { 'line-dasharray': dash } : {}),
       },
@@ -209,7 +228,7 @@ function addPoints(map, layer, srcId, before) {
       'circle-radius': ['interpolate', ['linear'], ['zoom'], 6, (s.radius ?? 4) * 0.6, 14, s.radius ?? 4],
       'circle-color': cssColor(s.fill),
       'circle-opacity': alpha,
-      'circle-stroke-width': s.strokeWidth ?? 1.2,
+      'circle-stroke-width': typeof s.strokeWidth === 'number' ? s.strokeWidth : 1.2,
       'circle-stroke-color': cssColor(s.stroke ?? '#ffffff'),
     },
   }, before);
@@ -302,5 +321,14 @@ export function syncLayers() {
 /** Wire the registry to the map. Call once at boot. */
 export function initLayerRendering() {
   onStyleReady(syncLayers);
-  subscribe(['layers'], syncLayers);
+  // `page` as well as `layers`: a line width is millimetres of paper, so
+  // changing the paper size changes how many pixels that is. Without this a
+  // 0.5 mm road stays the pixel count it was on A4 after you switch to A0.
+  subscribe(['layers', 'page'], syncLayers);
+
+  // And so does resizing the window, which rescales the artboard without any
+  // state changing. Listened for here rather than called from artboard.js so
+  // the dependency stays one-way: this module reads the artboard, never the
+  // other way round.
+  window.addEventListener('resize', debounce(syncLayers, 220));
 }

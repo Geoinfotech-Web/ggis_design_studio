@@ -17,12 +17,14 @@ import { FONTS } from '../core/constants.js';
 import { uid, esc } from '../core/dom.js';
 import { state } from '../core/store.js';
 import { bboxOf } from '../core/geo.js';
+import { getMap } from '../core/map.js';
+import { contextFor } from '../data/inset-context.js';
 import {
   rgba, roundRect, paintChrome, setFont, drawParagraph, drawLine, drawSwatch,
 } from './paint.js';
 import { legendRows, statsRows, metadataRows, creditsText, scaleBarFor } from './derive.js';
 import { iconSvg } from '../layers/icons.js';
-import { dashArray, isTransparent } from '../layers/symbology.js';
+import { dashArray, isTransparent, swatchStroke } from '../layers/symbology.js';
 
 /* ------------------------------------------------------------------ */
 /* shared style presets                                                */
@@ -87,7 +89,7 @@ function swatchHtml(kind, color, px, mark = {}) {
     if (svg) return svg;
   }
   if (kind === 'line') {
-    const h = Math.max(1.2, px * 0.26);
+    const h = Math.max(1.2, swatchStroke(px, mark.width));
     const pattern = dashArray(mark.dash);
     if (pattern) {
       // A repeating gradient reproduces the dasharray without an SVG, in the
@@ -357,8 +359,16 @@ function paintShape(c, s, box, u) {
 /* ------------------------------------------------------------------ */
 /* locator inset — project a study area into a small box               */
 /* ------------------------------------------------------------------ */
-function projectRings(geojson, box, stride = 1) {
-  const b = bboxOf(geojson);
+/**
+ * A lng/lat → box-pixel function fitted to `reference`, aspect preserved.
+ *
+ * Split out from the ring extraction below so that several outlines — a study
+ * area and the region containing it — can share **one** projection. Projecting
+ * each to its own bounds would centre both in the box and draw the study area
+ * filling a country it is a fiftieth the size of.
+ */
+function ringProjector(reference, box) {
+  const b = bboxOf(reference);
   if (!b) return null;
   const [w, s, e, n] = b;
   const spanX = Math.max(e - w, 1e-9);
@@ -366,15 +376,21 @@ function projectRings(geojson, box, stride = 1) {
   const k = Math.min(box.w / spanX, box.h / spanY);
   const ox = box.x + (box.w - spanX * k) / 2;
   const oy = box.y + (box.h - spanY * k) / 2;
-  const project = ([lng, lat]) => [ox + (lng - w) * k, oy + (n - lat) * k];
+  return ([lng, lat]) => [ox + (lng - w) * k, oy + (n - lat) * k];
+}
 
+/** Every polygon ring of a GeoJSON, projected and thinned for drawing. */
+function ringsOf(geojson, project, stride = 1) {
   const rings = [];
-  for (const f of geojson.features ?? [geojson]) {
-    const g = f.geometry ?? f;
+  for (const f of geojson?.features ?? [geojson]) {
+    const g = f?.geometry ?? f;
     if (!g) continue;
     const polys = g.type === 'MultiPolygon' ? g.coordinates : g.type === 'Polygon' ? [g.coordinates] : [];
     for (const poly of polys) {
       for (const ring of poly) {
+        // An administrative outline can run to thousands of vertices and the
+        // inset is a few centimetres across; past a few hundred points nothing
+        // is added but time, on every repaint.
         const step = Math.max(stride, Math.ceil(ring.length / 400));
         const out = [];
         for (let i = 0; i < ring.length; i += step) out.push(project(ring[i]));
@@ -383,6 +399,100 @@ function projectRings(geojson, box, stride = 1) {
     }
   }
   return rings.length ? rings : null;
+}
+
+/**
+ * Everything the locator inset needs to draw, computed once for both
+ * renderers.
+ *
+ * Both of them used to project the geometry themselves, which is how the
+ * on-screen inset and the printed one came to disagree. One function, two
+ * callers, no second opinion — the same rule the rest of this module follows.
+ *
+ * Projection is fitted to *the widest thing being drawn*: with a context
+ * outline that is the context, so the study area lands in its true position
+ * inside it, which is the entire point of a locator. Without one it is the
+ * study area, exactly as before.
+ *
+ * @param {object} elm
+ * @param {{x,y,w,h}} [box]  canvas pixels; omitted for the screen, which
+ *        works in a viewBox of the element's own proportions instead.
+ */
+function insetPlan(elm, box) {
+  const sa = state.studyArea;
+  if (!sa?.geojson) return null;
+
+  const s = elm.style ?? {};
+  const mode = s.context ?? 'auto';
+  const ctx = mode === 'none' ? null : contextFor(sa, mode);
+
+  // On screen the viewBox is the element's aspect, scaled to a comfortable
+  // number of user units; on canvas it is the box we were handed.
+  const aspect = box ? box.w / box.h : Math.max(0.05, (elm.w || 1) / (elm.h || 1));
+  const W = box ? box.w : (aspect >= 1 ? 100 : 100 * aspect);
+  const H = box ? box.h : (aspect >= 1 ? 100 / aspect : 100);
+  const pad = Math.min(W, H) * 0.04;
+  const frame = box
+    ? { x: box.x + pad, y: box.y + pad, w: box.w - pad * 2, h: box.h - pad * 2 }
+    : { x: pad, y: pad, w: W - pad * 2, h: H - pad * 2 };
+
+  // One projection for every ring, taken from whichever outline is widest, so
+  // the study area sits where it really sits inside the context.
+  const reference = ctx?.geojson ?? sa.geojson;
+  const project = ringProjector(reference, frame);
+  if (!project) return null;
+
+  const area = ringsOf(sa.geojson, project);
+  if (!area?.length) return null;
+
+  let extent = null;
+  if (s.extent) {
+    const b = viewBboxOf();
+    if (b) {
+      const [x0, y1] = project([b[0], b[3]]);
+      const [x1, y0] = project([b[2], b[1]]);
+      // A view zoomed well inside the study area collapses to a dot, which
+      // reads as a stray mark rather than as "you are here".
+      if (Math.abs(x1 - x0) >= 1.5 && Math.abs(y0 - y1) >= 1.5) {
+        extent = { x: x0, y: y1, w: x1 - x0, h: y0 - y1 };
+      }
+    }
+  }
+
+  return {
+    W, H,
+    area,
+    context: ctx ? ringsOf(ctx.geojson, project) : null,
+    extent,
+    stroke: box ? 1 : Math.max(0.6, Math.min(W, H) * 0.012),
+  };
+}
+
+/**
+ * The pixel box of an element's inner node, or null before it has one.
+ *
+ * Null on the very first paint of a fresh artboard, which is why insetPlan
+ * still has a fallback: the element renders once at an estimated aspect and
+ * again, correctly, as soon as it has been laid out.
+ */
+function boxOfNode(node) {
+  if (!node) return null;
+  // getBoundingClientRect, not clientWidth: the latter is rounded to whole
+  // pixels, and a 100 × 66.4 box reported as 100 × 66 is an aspect ratio 1.5%
+  // out — which the SVG then applies to the outline as a 1.5% stretch.
+  const { width: w, height: h } = node.getBoundingClientRect();
+  return w > 2 && h > 2 ? { x: 0, y: 0, w, h } : null;
+}
+
+/** The bounding box the main map is currently showing, as [w, s, e, n]. */
+function viewBboxOf() {
+  try {
+    const b = getMap()?.getBounds();
+    if (!b) return null;
+    return [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()];
+  } catch {
+    return null;
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -701,42 +811,83 @@ export const ELEMENT_TYPES = {
   },
 
   inset: {
-    label: 'Locator inset', icon: '⊞', hint: 'Small outline of the study area',
+    label: 'Locator inset', icon: '⊞', hint: 'Where the study area sits in the wider region',
     inspect: ['inset', 'chrome'],
     defaults: { x: 68, y: 20, w: 26, h: 20 },
-    style: { ...TEXT, ...CARD, size: 8, color: '#0f172a', fill: '#38bdf8', stroke: '#0369a1', fillOpacity: 0.35, padding: 5 },
-    dom(inner, elm, ctx) {
-      const { u } = ctx;
-      const s = elm.style;
-      const sa = state.studyArea;
-      if (!sa?.geojson) {
-        inner.innerHTML = `<div style="height:100%;display:grid;place-items:center;opacity:.5;text-align:center">Load a study area</div>`;
+    style: {
+      ...TEXT, ...CARD, size: 8, color: '#0f172a',
+      fill: '#38bdf8', stroke: '#0369a1', fillOpacity: 0.55, padding: 5,
+      context: 'auto', contextFill: '#e2e8f0', contextStroke: '#94a3b8',
+      extent: false, extentStroke: '#dc2626',
+    },
+    dom(inner, elm) {
+      // Measured, not derived. An element's `w` is a percentage of page width
+      // and its `h` a percentage of page *height*, so w/h is not its aspect
+      // ratio on any paper that is not square — and an inset drawn to the
+      // wrong aspect is an outline of the wrong shape. The node is positioned
+      // before this runs, so its real pixel box is there to be read, and using
+      // it makes the preview identical to the canvas path by construction.
+      const plan = insetPlan(elm, boxOfNode(inner));
+      if (!plan) {
+        inner.innerHTML = '<div style="height:100%;display:grid;place-items:center;opacity:.5;text-align:center">Load a study area</div>';
         return;
       }
-      const W = 100, H = 100;
-      const rings = projectRings(sa.geojson, { x: 2, y: 2, w: W - 4, h: H - 4 });
-      const path = (rings ?? []).map((r) => `M${r.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join('L')}Z`).join('');
-      inner.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:100%;display:block">
-        <path d="${path}" fill="${rgba(s.fill, s.fillOpacity)}" stroke="${s.stroke}" stroke-width="1.2" vector-effect="non-scaling-stroke"/>
+      const s = elm.style;
+      // The viewBox matches the element's own proportions and the projection
+      // is aspect-correct inside it, so the preview is the print. It used to
+      // be a square viewBox stretched with preserveAspectRatio="none", which
+      // squashed every outline on screen by exactly the amount the element was
+      // off square — and then printed it correctly, so the two disagreed.
+      const { W, H, context, area, extent, stroke } = plan;
+      const path = (rings) => (rings ?? [])
+        .map((r) => `M${r.map(([x, y]) => `${x.toFixed(2)},${y.toFixed(2)}`).join('L')}Z`).join('');
+
+      inner.innerHTML = `<svg viewBox="0 0 ${W.toFixed(3)} ${H.toFixed(3)}" preserveAspectRatio="none" style="width:100%;height:100%;display:block">
+        ${context ? `<path d="${path(context)}" fill="${rgba(s.contextFill, 1)}" stroke="${s.contextStroke}" stroke-width="${stroke * 0.75}" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>` : ''}
+        <path d="${path(area)}" fill="${rgba(s.fill, s.fillOpacity)}" stroke="${s.stroke}" stroke-width="${stroke}" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+        ${extent ? `<rect x="${extent.x.toFixed(2)}" y="${extent.y.toFixed(2)}" width="${extent.w.toFixed(2)}" height="${extent.h.toFixed(2)}" fill="none" stroke="${s.extentStroke}" stroke-width="${stroke}" vector-effect="non-scaling-stroke"/>` : ''}
       </svg>`;
     },
     paint(c, elm, box, ctx) {
+      const plan = insetPlan(elm, box);
+      if (!plan) return;
       const s = elm.style;
-      const sa = state.studyArea;
-      if (!sa?.geojson) return;
-      const rings = projectRings(sa.geojson, box);
-      if (!rings) return;
+      const w = Math.max(0.7, ctx.u(0.8));
+
+      const trace = (rings) => {
+        c.beginPath();
+        for (const ring of rings) {
+          ring.forEach(([x, y], i) => (i ? c.lineTo(x, y) : c.moveTo(x, y)));
+          c.closePath();
+        }
+      };
+
       c.save();
-      c.beginPath();
-      for (const ring of rings) {
-        ring.forEach(([x, y], i) => (i ? c.lineTo(x, y) : c.moveTo(x, y)));
-        c.closePath();
+      c.lineJoin = 'round';
+
+      // The surrounding region first, so the study area reads as sitting
+      // inside it rather than beside it.
+      if (plan.context) {
+        trace(plan.context);
+        c.fillStyle = rgba(s.contextFill, 1);
+        c.fill('evenodd');
+        c.strokeStyle = s.contextStroke;
+        c.lineWidth = w * 0.75;
+        c.stroke();
       }
+
+      trace(plan.area);
       c.fillStyle = rgba(s.fill, s.fillOpacity);
       c.fill('evenodd');
       c.strokeStyle = s.stroke;
-      c.lineWidth = Math.max(0.8, ctx.u(0.9));
+      c.lineWidth = w;
       c.stroke();
+
+      if (plan.extent) {
+        c.strokeStyle = s.extentStroke;
+        c.lineWidth = w;
+        c.strokeRect(plan.extent.x, plan.extent.y, plan.extent.w, plan.extent.h);
+      }
       c.restore();
     },
   },

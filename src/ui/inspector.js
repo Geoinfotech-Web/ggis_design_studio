@@ -9,23 +9,24 @@
 
 import { $, el, fill } from '../core/dom.js';
 import { state, set, subscribe, checkpoint, touch } from '../core/store.js';
-import { FONTS, PAPER_SIZES, effectiveDpi } from '../core/constants.js';
+import { FONTS, PAPER_SIZES, EXPORT_RESOLUTIONS, effectiveDpi, paperDimsLabel } from '../core/constants.js';
 import { ELEMENT_TYPES, elementLabel, SHAPE_VARIANTS } from '../layout/elements.js';
 import { updateElement, removeElement, duplicateElement, renderElements, layoutArtboard } from './artboard.js';
 import { alignElements, placeElement, fillPage, PLACEMENT_SPOTS } from '../layout/align.js';
 import { updateLayer, removeLayer, applySymbology } from '../layers/registry.js';
 import {
   SYMBOLOGY_MODES, RAMP_PRESETS, singleSymbology, categorisedSymbology,
-  graduatedSymbology, valuesIn, applyRamp, reverseRamp,
+  graduatedSymbology, valuesIn, applyRamp, reverseRamp, baseWidthOf,
 } from '../layers/symbology.js';
 import { legendEditor, layerLegendRows, iconPicker, dashPicker } from './legend-editor.js';
 import { numericKeys, propertyKeys } from '../data/upload.js';
+import { CONTEXT_MODES, contextLabel } from '../data/inset-context.js';
 import { flyToBounds } from '../core/map.js';
 import { boundsFromBbox } from '../core/geo.js';
 import { notify } from '../core/toast.js';
 import {
   head, section, labelled, select, textArea, textInput, slider, seg,
-  colorInput, checkRow, button, stack, inline, inspectorRow,
+  colorInput, checkRow, button, stack, inline, inspectorRow, widthInput,
 } from './controls.js';
 
 let panel;
@@ -152,10 +153,34 @@ function groupNeatline(elm) {
 function groupInset(elm) {
   const s = elm.style;
   const setStyle = styleSetter(elm);
+  const mode = s.context ?? 'auto';
+  const showsContext = mode !== 'none';
+
   return section('Locator', stack([
-    inspectorRow('Fill', colorInput(s.fill, (value) => setStyle({ fill: value }))),
-    inspectorRow('Fill opacity', slider({ min: 0, max: 1, step: 0.05, value: s.fillOpacity ?? 0.35 }, (v) => setStyle({ fillOpacity: v }))),
+    // The whole job of a locator is to place the study area inside something
+    // the reader recognises, so what that something is comes first.
+    labelled('Show inside', select(
+      CONTEXT_MODES.map((m) => ({ value: m.id, label: m.label })),
+      mode,
+      (value) => { setStyle({ context: value }, false); renderElements(); renderInspector(); },
+    ), state.studyArea
+      ? `${CONTEXT_MODES.find((m) => m.id === mode)?.hint} — ${contextLabel(state.studyArea, mode)}`
+      : CONTEXT_MODES.find((m) => m.id === mode)?.hint),
+
+    checkRow('Mark the map view', Boolean(s.extent), (on) => setStyle({ extent: on }),
+      'Draws a rectangle where the main map is currently looking.'),
+
+    el('div.panel-title', { text: 'Study area', style: { marginTop: '4px' } }),
+    inspectorRow('Fill', colorInput(s.fill, (value) => setStyle({ fill: value }), { transparent: true })),
+    inspectorRow('Fill opacity', slider({ min: 0, max: 1, step: 0.05, value: s.fillOpacity ?? 0.55 }, (v) => setStyle({ fillOpacity: v }))),
     inspectorRow('Outline', colorInput(s.stroke, (value) => setStyle({ stroke: value }))),
+
+    showsContext ? el('div.panel-title', { text: 'Surrounding region', style: { marginTop: '4px' } }) : null,
+    showsContext ? inspectorRow('Fill', colorInput(s.contextFill ?? '#e2e8f0', (value) => setStyle({ contextFill: value }), { transparent: true })) : null,
+    showsContext ? inspectorRow('Outline', colorInput(s.contextStroke ?? '#94a3b8', (value) => setStyle({ contextStroke: value }))) : null,
+
+    s.extent ? inspectorRow('View marker', colorInput(s.extentStroke ?? '#dc2626', (value) => setStyle({ extentStroke: value }))) : null,
+
     state.studyArea ? null : el('p', {
       style: { margin: 0, fontSize: '10.5px', color: '#b45309', lineHeight: '1.4' },
       text: 'Load a study area and its outline appears here.',
@@ -432,7 +457,21 @@ function layerInspector(layer) {
             colorInput(s.stroke, (value) => { setStyle({ stroke: value }, false); refresh(true); }, { transparent: true, title: 'Outline colour' }),
             el('span', { text: 'Outline colour', style: { fontSize: '11.5px', color: 'var(--ink-soft)', flex: '1' } }),
           ]) : null,
-          inspectorRow('Outline width', slider({ min: 0, max: 8, step: 0.2, value: s.strokeWidth ?? 1.2 }, (v) => setStyle({ strokeWidth: v }))),
+          // Line work is the layer itself, not an edge around something else,
+          // so it gets its own control and its own words. Roads, rivers,
+          // railways and pipelines all land here.
+          layer.kind === 'line'
+            ? labelled('Line thickness', widthInput(baseWidthOf(s), (mm) => setStyle({ widthMm: mm }), { rerender: renderInspector }),
+                'Millimetres on the printed page, whatever the zoom or the paper size.')
+            : inspectorRow('Outline width', slider({ min: 0, max: 8, step: 0.2, value: s.strokeWidth ?? 1.2 }, (v) => setStyle({ strokeWidth: v }))),
+          // Classes that arrived with their own weight keep it, scaled by the
+          // field above — so this says what typing in it actually does.
+          layer.kind === 'line' && layer.symbology?.categories?.some((c) => c.width)
+            ? el('p', {
+                style: { margin: 0, fontSize: '10.5px', color: 'var(--ink-faint)', lineHeight: '1.45' },
+                text: 'Each class keeps its own relative weight — set one on its own below.',
+              })
+            : null,
           layer.kind === 'point'
             ? inspectorRow('Point size', slider({ min: 1, max: 16, step: 0.5, value: s.radius ?? 4 }, (v) => setStyle({ radius: v })))
             : null,
@@ -580,7 +619,7 @@ function pageInspector() {
     section('Paper', stack([
       labelled('Size', select(
         Object.entries(PAPER_SIZES).map(([value, p]) => ({
-          value, label: `${p.label} · ${p.wIn}″ × ${p.hIn}″`, group: p.group,
+          value, label: `${p.label} · ${paperDimsLabel(p)}`, group: p.group,
         })),
         state.page.size, (value) => update({ size: value }),
       )),
@@ -589,12 +628,12 @@ function pageInspector() {
         fixed ? paper.fixedOrientation : state.page.orientation,
         (value) => update({ orientation: value }),
       ), fixed ? `${paper.label} is always ${paper.fixedOrientation}.` : ''),
-      labelled('Export quality', seg(
-        [{ value: 96, label: 'Screen' }, { value: 150, label: 'Standard' }, { value: 300, label: 'Print' }],
+      labelled('Export resolution', select(
+        EXPORT_RESOLUTIONS.map((r) => ({ value: r.dpi, label: `${r.label} · ${r.dpi} dpi` })),
         state.page.dpi, (value) => update({ dpi: Number(value) }),
       ), real < state.page.dpi
         ? `${paper.label} is too big for ${state.page.dpi} dpi in a browser — the export will be ${real} dpi (${megapixels} megapixels), which is still ${real >= 150 ? 'fine for large-format printing at normal viewing distance' : 'best treated as a draft'}.`
-        : `Exports at ${real} dpi — ${megapixels} megapixels.`),
+        : `${Math.round(wide * real)} × ${Math.round(tall * real)} px at ${real} dpi — ${megapixels} megapixels.`),
       inspectorRow('Page background', colorInput(state.page.background ?? '#ffffff', (value) => {
         set({ page: { ...state.page, background: value } }, { history: false });
       })),

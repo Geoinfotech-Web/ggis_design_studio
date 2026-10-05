@@ -122,11 +122,65 @@
   display: grid; place-items: center; height: 28px; width: 28px; flex: none;
   border-radius: 8px; background: var(--line-soft); font-size: 14px; color: var(--ink-soft);
 }
+/* Drawn icons sit on the text colour and follow the row's active state,
+   which a glyph in a fallback font never did. */
+.el-ico { display: grid; place-items: center; color: var(--ink-soft); }
+.el-ico svg { display: block; }
+.row.is-active .el-ico, .row:hover .el-ico { color: var(--ink); }
+.chev { color: inherit; }
+
 .row-main { min-width: 0; flex: 1; }
+
+/* One line each, ending in an ellipsis at whatever width the panel happens to
+   be. The title used to be truncated in JavaScript at a fixed character count,
+   which is a guess about the panel width that is wrong at every width — too
+   early on a wide screen, still overflowing on a phone. `min-width: 0` on the
+   parent is what lets a flex child shrink below its content at all. */
+.row-title,
+.row-sub {
+  display: block; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .row-title { font-size: 12.5px; font-weight: 600; color: var(--ink); }
 .row-sub { font-size: 10.5px; color: var(--ink-faint); line-height: 1.3; }
-.row-act { flex: none; display: flex; gap: 2px; opacity: 0; transition: opacity 0.13s; }
-.row:hover .row-act, .row.is-active .row-act { opacity: 1; }
+
+/* The actions float over the end of the row rather than sitting beside it.
+   The side panel is a fixed ~280px at every desktop width, so six 23px
+   buttons in the flow leave about 25px for the name — the one part of the row
+   that says which element it is. Taking them out of the flow gives the name
+   the full width when you are reading the list, and the buttons appear over
+   its right end when you actually reach for them. */
+.row { position: relative; }
+.row-act {
+  position: absolute; right: 7px; top: 50%; transform: translateY(-50%);
+  display: flex; gap: 1px; padding-left: 20px; border-radius: 8px;
+  opacity: 0; pointer-events: none; transition: opacity 0.13s;
+  /* Fades the truncated text out underneath instead of chopping it. */
+  background: linear-gradient(90deg, transparent, var(--surface-2) 20px);
+}
+.row:hover .row-act,
+.row.is-active .row-act,
+/* Keyboard users never hover, so the actions have to appear on focus too or
+   they are unreachable without a mouse. */
+.row:focus-within .row-act { opacity: 1; pointer-events: auto; }
+.row.is-active .row-act { background: linear-gradient(90deg, transparent, var(--accent-wash) 20px); }
+
+/* Row actions are chrome inside a 12.5px line; the 32px header button is far
+   too heavy here. Sized in CSS rather than inline so one change moves the
+   whole set. */
+.row-act .icon-btn { height: 23px; width: 23px; border-radius: 6px; }
+.ui-ico { display: grid; place-items: center; color: inherit; }
+.ui-ico svg { display: block; }
+
+/* A toggle that is currently on reads as on — a hidden element's eye stays
+   struck through and lit whether or not the pointer is over it. */
+.icon-btn.is-pressed { color: var(--accent); background: var(--accent-wash); border-color: var(--accent-soft); }
+.icon-btn.is-danger:hover { color: var(--ember); border-color: color-mix(in srgb, var(--ember) 40%, transparent); }
+
+/* Elements list: a hidden element is still listed, but should not compete
+   with the ones actually on the page. */
+.row--element.is-muted .row-title, .row--element.is-muted .el-ico { opacity: 0.55; }
+
 
 .swatch { height: 11px; width: 11px; flex: none; border-radius: 3px; border: 1px solid rgba(var(--shadow-tint), .12); }
 
@@ -358,11 +412,30 @@ input[type='range'] { width: 100%; accent-color: var(--accent); }
   .rail-ico { font-size: 18px; }
 }
 
-/* A pointer that cannot hover gets the row actions permanently, because
-   there is no hover state to reveal them. */
+/* A pointer that cannot hover gets the row actions permanently, because there
+   is no hover state to reveal them — and something permanently covering the
+   end of every name is worse than a taller row. So on touch they come back
+   into the flow, on a line of their own beneath the name.
+
+   Keyed on hover rather than on width because that is the actual condition: a
+   touchscreen laptop has a wide window and no hover, and would otherwise sit
+   with six buttons parked over every name it is trying to show.
+
+   Only the actions move. The tick, the icon and the name stay on one line, so
+   the row still reads as a row; wrapping the name as well puts the icon on a
+   line beside nothing and makes every row half as tall again. */
 @media (hover: none) {
-  .row-act { opacity: 1; }
+  .row { flex-wrap: wrap; row-gap: 3px; }
+  .row-act {
+    position: static; transform: none;
+    flex: 1 0 100%; justify-content: flex-end;
+    opacity: 1; pointer-events: auto;
+    padding-left: 0; padding-top: 2px;
+    background: none; border-top: 1px solid var(--line-soft);
+  }
+  .row.is-active .row-act { background: none; }
   .icon-btn, .rail-btn { min-height: 32px; }
+  .row-act .icon-btn { height: 30px; width: 30px; }
 }
 
 /* Motion is decoration here; the panels must arrive whether or not it plays.

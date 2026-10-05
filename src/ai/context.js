@@ -31,7 +31,15 @@ export function mapContext() {
     template: tpl ? { name: tpl.name, category: tpl.category } : null,
     page: `${paper.label} ${paper.orientation} at ${state.page.dpi} dpi`,
     studyArea: area
-      ? { name: area.name, level: area.level, areaKm2: Number(area.areaKm2?.toFixed(1)), fullName: area.displayName }
+      ? {
+          name: area.name,
+          level: area.level,
+          areaKm2: Number(area.areaKm2?.toFixed(1)),
+          fullName: area.displayName,
+          // Named individually when there are several, so a written summary
+          // can say which places it is describing rather than "3 areas".
+          ...(area.parts?.length > 1 ? { areas: area.parts.map((p) => p.name) } : {}),
+        }
       : null,
     mapView: {
       centre: state.mapView.center.map((n) => Number(n.toFixed(4))),
@@ -76,6 +84,9 @@ export function localBriefing() {
 
   if (ctx.studyArea) {
     lines.push(`**${ctx.studyArea.name}** — ${formatArea(ctx.studyArea.areaKm2)}, mapped at ${ctx.page}.`);
+    if (ctx.studyArea.areas) {
+      lines.push(`Covering ${ctx.studyArea.areas.join(', ')} — every figure below is the total across all of them.`);
+    }
   } else {
     lines.push(`**${ctx.project}** — no study area loaded yet, mapped at ${ctx.page}.`);
   }

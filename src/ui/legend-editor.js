@@ -19,9 +19,13 @@
 import { el } from '../core/dom.js';
 import { state } from '../core/store.js';
 import { updateLayer, applySymbology, shade } from '../layers/registry.js';
-import { patchBucket, legendRowsFor, LINE_STYLES, dashArray, isTransparent } from '../layers/symbology.js';
+import {
+  patchBucket, legendRowsFor, LINE_STYLES, dashArray, isTransparent,
+  baseWidthOf, swatchStroke, DEFAULT_LINE_WIDTH_MM,
+} from '../layers/symbology.js';
+import { fromMm } from '../core/constants.js';
 import { ICONS, iconGroups, iconSvg } from '../layers/icons.js';
-import { textInput, colorInput, stack } from './controls.js';
+import { textInput, colorInput, stack, widthInput } from './controls.js';
 
 /* ------------------------------------------------------------------ */
 /* pickers                                                             */
@@ -120,6 +124,37 @@ function iconPicker(current, color, onPick) {
   return box;
 }
 
+/**
+ * Line thickness for one class: a measured field, opened from a preview of
+ * the weight it currently draws.
+ *
+ * The preview is the summary rather than the whole control because a legend
+ * row is already a colour, a pattern and a label wide — but the value itself
+ * is a number in millimetres, not a name, because "heavy" is not something
+ * you can hand to a printer or match to a house style.
+ */
+function widthPicker(currentMm, color, dash, onPick, rerender) {
+  const mm = Number(currentMm) || DEFAULT_LINE_WIDTH_MM;
+
+  const box = el('details.group', { style: { border: 'none', background: 'transparent' } });
+  const summary = el('summary', {
+    title: `Thickness: ${fromMm(mm, 'mm')} mm`,
+    style: {
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      height: '26px', width: '30px', padding: '0', cursor: 'pointer', listStyle: 'none',
+      border: '1px solid var(--line)', borderRadius: '7px', background: 'var(--surface)',
+    },
+  }, [dashPreview(dash || 'solid', color, 20, swatchStroke(13, mm))]);
+
+  const body = el('div.group-body', { style: { padding: '8px 2px 2px', display: 'grid', gap: '6px' } }, [
+    el('div.field-label', { text: 'Thickness on the printed page' }),
+    widthInput(mm, (next) => { box.open = false; onPick(next); }, { compact: true, rerender }),
+  ]);
+
+  box.append(summary, body);
+  return box;
+}
+
 /** Six line patterns as previews, chosen in place. */
 function dashPicker(current, color, onPick) {
   const box = el('details.group', { style: { border: 'none', background: 'transparent' } });
@@ -197,6 +232,10 @@ function handlersFor(layer, index, after) {
     setLabel: (label) => writeSym({ label }, false),
     setIcon: (icon) => (perClass() ? writeSym({ icon }, true) : writeStyle({ icon })),
     setDash: (dash) => (perClass() ? writeSym({ dash }, true) : writeStyle({ dash })),
+    // Same split as the pattern above: one class of a categorised layer gets
+    // its own weight, while a single-colour layer has only the one line to
+    // set, which is the layer's own thickness. Millimetres, both ways.
+    setWidth: (width) => (perClass() ? writeSym({ width }, true) : writeStyle({ widthMm: width })),
   };
 }
 
@@ -236,6 +275,11 @@ export function legendRow(layer, row, index, after, opts = {}) {
     isPoint ? iconPicker(row.icon ?? '', preview, (id) => h.setIcon(id)) : null,
     layer.kind === 'line' || layer.kind === 'polygon'
       ? dashPicker(row.dash ?? 'solid', preview, (id) => h.setDash(id))
+      : null,
+    // Only line work: the thickness of a polygon's outline is one property of
+    // the whole layer, not something each legend row can differ on.
+    layer.kind === 'line'
+      ? widthPicker(row.width ?? baseWidthOf(layer.style), preview, row.dash, (w) => h.setWidth(w), () => after(true))
       : null,
     label,
   ]);

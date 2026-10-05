@@ -20,14 +20,16 @@ import {
   fetchOvertureSupplement, checkSupplement, isFromOsm, isSupplementCached,
 } from '../../data/overture.js';
 import { parseGeoFile, ACCEPTED } from '../../data/upload.js';
+import { areaParts } from '../../data/study-areas.js';
+import { uiIcon } from '../ui-icons.js';
 import { addVectorLayer, removeLayer, replaceBySlug } from '../../layers/registry.js';
-import { categorisedSymbology, singleSymbology, valuesIn, lineWidth } from '../../layers/symbology.js';
+import { categorisedSymbology, singleSymbology, valuesIn, DEFAULT_LINE_WIDTH_MM } from '../../layers/symbology.js';
 import { iconSvg } from '../../layers/icons.js';
 import { featureCount, formatNumber, bboxOf, boundsFromBbox, clipToArea, dominantGeometry } from '../../core/geo.js';
 import { flyToBounds } from '../../core/map.js';
 import { renderElements, hint } from '../artboard.js';
 import { setTool } from '../tool.js';
-import { head, section, group, row, empty, button, stack, miniBtn, checkRow } from '../controls.js';
+import { head, section, group, row, empty, button, stack, miniBtn, checkRow, chevron } from '../controls.js';
 
 let pane;
 const inflight = new Map();          // slug → AbortController
@@ -193,6 +195,107 @@ function prefetchName(area) {
   return `${parts[0]}, ${parts[parts.length - 1]}`;
 }
 
+/**
+ * Fetch one dataset for one study area, both providers, merged and clipped.
+ *
+ * Split out because a map can have several areas and they are fetched
+ * separately — see fetchAllParts() for why that matters more than it sounds.
+ */
+async function fetchForPart(dataset, part, { signal, onProgress }) {
+  const supplement = dataset.overture;
+  // Both providers at once. Overpass and Overture share nothing but the study
+  // area, so waiting for one before starting the other would just add the two
+  // waits together.
+  //
+  // The tile budget is a download budget, so a supplement already stored has
+  // no tiles to pull and the size check does not apply to it.
+  const room = supplement ? checkSupplement(supplement, part.bbox) : { ok: false };
+  const supStored = supplement && !room.ok ? await isSupplementCached(supplement, part.bbox) : null;
+
+  const [osm, extra] = await Promise.all([
+    // Cached per slug + bbox, so re-filtering never re-downloads.
+    fetchDataset(dataset, part.bbox, { signal, onProgress }),
+    // Overture is a supplement, never a requirement: if it is unavailable or
+    // the area is too big for it, the dataset is still the dataset.
+    room.ok || supStored
+      ? fetchOvertureSupplement(supplement, part.bbox, { signal, onProgress }).catch(() => null)
+      : Promise.resolve(null),
+  ]);
+
+  const geojson = mergeProviders(osm, extra);
+  // Overpass can only be asked for a rectangle, so trim the corners of that
+  // rectangle back to the boundary the map is actually about. Clipping here
+  // rather than at the end is what makes several areas work: each part is cut
+  // to its *own* outline, so the ground between two distant areas never
+  // arrives as data.
+  return {
+    geojson: state.clipToArea === false ? geojson : clipToArea(geojson, part.geojson),
+    meta: geojson.meta,
+  };
+}
+
+/**
+ * Every study area's worth of one dataset, as a single collection.
+ *
+ * One request per area rather than one over a box covering them all — a
+ * rectangle around Lagos and Kano is most of southern Nigeria, which no
+ * public Overpass will answer and none of which the map is about.
+ *
+ * Areas are fetched one after another on purpose. They are separate queries
+ * to a donated service, and the client already caps concurrency; firing a
+ * state's worth of them at once is how a mirror starts refusing.
+ */
+async function fetchAllParts(dataset, parts, { signal, onProgress }) {
+  const features = [];
+  const seen = new Set();
+  const metas = [];
+  let duplicates = 0;
+
+  for (const [i, part] of parts.entries()) {
+    const where = parts.length > 1 ? `${part.name} · ${i + 1} of ${parts.length}` : '';
+    const { geojson, meta } = await fetchForPart(dataset, part, {
+      signal,
+      onProgress: (msg) => onProgress(where ? `${msg}<br />${where}` : msg),
+    });
+    if (meta) metas.push(meta);
+
+    for (const f of geojson.features ?? []) {
+      // Study areas are allowed to overlap — an LGA and the state around it
+      // are both reasonable things to add — and a feature in the overlap
+      // comes back from both. OpenStreetMap ids are stable and unique, so the
+      // second copy is dropped rather than drawn and counted twice.
+      const id = f.id ?? f.properties?.['@id'] ?? null;
+      if (id !== null) {
+        if (seen.has(id)) { duplicates++; continue; }
+        seen.add(id);
+      }
+      features.push(f);
+    }
+  }
+
+  // The first part's provenance stands for the fetch: the cache note and the
+  // Overture counts are about how the data arrived, and it arrived the same
+  // way for each of them.
+  const merged = metas.reduce((acc, m) => ({
+    ...acc,
+    ...m,
+    merged: m.merged && acc.merged
+      ? {
+          ...m.merged,
+          osm: acc.merged.osm + m.merged.osm,
+          overtureAdded: acc.merged.overtureAdded + m.merged.overtureAdded,
+          overtureDuplicates: acc.merged.overtureDuplicates + m.merged.overtureDuplicates,
+        }
+      : (m.merged ?? acc.merged),
+  }), {});
+
+  return {
+    type: 'FeatureCollection',
+    features,
+    meta: { ...merged, ...(duplicates ? { areaOverlap: duplicates } : {}) },
+  };
+}
+
 async function addDataset(dataset, { quiet = false } = {}) {
   const area = state.studyArea;
   if (!area) {
@@ -202,19 +305,23 @@ async function addDataset(dataset, { quiet = false } = {}) {
   }
   if (inflight.has(dataset.slug)) return;
 
+  const parts = areaParts(area);
+
   // The size limit is about not asking a free public service for a whole
-  // state — so it only applies if we would actually have to ask. A download
-  // already sitting in a cache costs Overpass nothing to serve.
-  const size = checkSize(dataset, area.bbox);
-  const stored = size.ok ? null : await isDatasetCached(dataset, area.bbox);
-  if (!size.ok && !stored) {
+  // state — so it only applies if we would actually have to ask, and it
+  // applies to each area separately, because each is its own query. A
+  // download already sitting in a cache costs Overpass nothing to serve.
+  for (const part of parts) {
+    const size = checkSize(dataset, part.bbox);
+    if (size.ok) continue;
+    if (await isDatasetCached(dataset, part.bbox)) continue;
     // "Zoom in" is only half the answer, and it is the half that makes the
     // map smaller than the user wanted. The other half is that this area can
     // be fetched once, in pieces, into the database — after which it loads at
     // full size. Naming the command with this area already in it is the
     // difference between advice and something you can act on.
     notify.warn(
-      `${size.reason}<br /><br />Or fetch ${area.name} into the offline database once — it is downloaded in pieces, so the limit does not apply, and it loads instantly from then on:<br /><code>npm run prefetch -- --areas "${prefetchName(area)}" --tile</code>`,
+      `${parts.length > 1 ? `<b>${part.name}</b>: ` : ''}${size.reason}<br /><br />Or fetch ${part.name} into the offline database once — it is downloaded in pieces, so the limit does not apply, and it loads instantly from then on:<br /><code>npm run prefetch -- --areas "${prefetchName(part)}" --tile</code>`,
       { duration: 16000 },
     );
     return;
@@ -226,47 +333,16 @@ async function addDataset(dataset, { quiet = false } = {}) {
   const status = notify.busy(`Fetching <b>${dataset.name}</b>…`);
 
   try {
-    // Both providers at once. Overpass and Overture share nothing but the
-    // study area, so waiting for one before starting the other would just
-    // add the two waits together.
-    const supplement = dataset.overture;
-    // Same reasoning on the Overture side: the tile budget is a download
-    // budget, and a supplement that is already stored has no tiles to pull.
-    const room = supplement ? checkSupplement(supplement, area.bbox) : { ok: false };
-    const supStored = supplement && !room.ok ? await isSupplementCached(supplement, area.bbox) : null;
-
-    const [osm, extra] = await Promise.all([
-      // Cached per slug + bbox, so re-filtering never re-downloads.
-      fetchDataset(dataset, area.bbox, {
-        signal: controller.signal,
-        onProgress: (msg) => status.update(`${msg}<br /><b>${dataset.name}</b>`),
-      }),
-      // Overture is a supplement, never a requirement: if it is unavailable
-      // or the area is too big for it, the dataset is still the dataset.
-      room.ok || supStored
-        ? fetchOvertureSupplement(supplement, area.bbox, {
-            signal: controller.signal,
-            onProgress: (msg) => status.update(`${msg}<br /><b>${dataset.name}</b>`),
-          }).catch(() => null)
-        : Promise.resolve(null),
-    ]);
-
-    const geojson = mergeProviders(osm, extra);
-
-    if (!featureCount(geojson)) {
-      status.update(`Neither OpenStreetMap nor Overture has <b>${dataset.name}</b> mapped in this area yet.`, { tone: 'warn', duration: 6000 });
-      return;
-    }
-
-    // Overpass can only be asked for a rectangle, so trim the corners of that
-    // rectangle back to the boundary the map is actually about. Clipping
-    // before tallying keeps the type counts honest — they describe what is on
-    // the map, not what was downloaded — and leaves the cached download
-    // untouched for the next filter change.
-    const clipped = state.clipToArea === false ? geojson : clipToArea(geojson, area.geojson);
+    const clipped = await fetchAllParts(dataset, parts, {
+      signal: controller.signal,
+      onProgress: (msg) => status.update(`${msg}<br /><b>${dataset.name}</b>`),
+    });
 
     if (!featureCount(clipped)) {
-      status.update(`<b>${dataset.name}</b> is mapped nearby but none of it falls inside ${area.name}.`, { tone: 'warn', duration: 7000 });
+      status.update(
+        `Neither OpenStreetMap nor Overture has <b>${dataset.name}</b> mapped inside ${area.name} yet.`,
+        { tone: 'warn', duration: 7000 },
+      );
       removeLayer(layerForSlug(dataset.slug)?.id);
       return;
     }
@@ -289,16 +365,19 @@ async function addDataset(dataset, { quiet = false } = {}) {
     // Some Overture layers mix geometry types in one theme, so the kind is
     // read off the data when the catalogue does not commit to one.
     const kind = dataset.kind ?? dominantGeometry(filtered);
-    // Lines get a zoom-aware, class-weighted width so they read at any scale.
+    // Lines carry a base thickness in millimetres of printed page;
+    // layers/render.js turns it into the class-weighted pixel width the map
+    // draws, so the number here stays something the thickness field can read
+    // back and the user can type into.
     const style = { labelField: dataset.labelField ?? '' };
-    if (kind === 'line') style.strokeWidth = lineWidth(symbology, 1.8);
+    if (kind === 'line') style.widthMm = DEFAULT_LINE_WIDTH_MM;
     if (kind === 'point') style.radius = 5;
     // The dataset's own symbol and line pattern — the fallback for anything
     // its classes have not overridden, and the whole story when it has none.
     if (dataset.symbol) style.icon = dataset.symbol;
     if (dataset.dash) style.dash = dataset.dash;
 
-    const merged = geojson.meta?.merged;
+    const merged = clipped.meta?.merged;
 
     replaceBySlug(dataset.slug, {
       name: pick && dataset.segments ? `${dataset.name} (${pick.size} of ${dataset.segments.length} types)` : dataset.name,
@@ -320,15 +399,21 @@ async function addDataset(dataset, { quiet = false } = {}) {
     // instantly is worth saying out loud — it is the difference between the
     // app feeling broken and the app feeling fast — and the age is what tells
     // someone whether to think about refreshing it.
-    const cached = geojson.meta?.cache;
+    const cached = clipped.meta?.cache;
     const via = cached
       ? ` from ${cached.source === 'database' ? 'the shared database' : 'cache'}${cached.ageDays > 1 ? `, stored ${cached.ageDays} days ago` : ''}`
-      : (geojson.meta?.seconds ? ` in ${geojson.meta.seconds}s` : '');
+      : (clipped.meta?.seconds ? ` in ${clipped.meta.seconds}s` : '');
     const plus = merged?.overtureAdded
       ? ` — ${formatNumber(merged.overtureAdded, 0)} added by Overture on top of OpenStreetMap`
       : '';
+    // Worth saying when it happened: overlapping study areas are a legitimate
+    // thing to have, and this is the app showing its working rather than
+    // quietly returning a different number than the sum of the parts.
+    const across = parts.length > 1
+      ? ` across ${parts.length} areas${clipped.meta?.areaOverlap ? `, ${formatNumber(clipped.meta.areaOverlap, 0)} overlapping duplicates dropped` : ''}`
+      : '';
     if (quiet) status.close();
-    else status.update(`<b>${dataset.name}</b> · ${formatNumber(features.length, 0)} features${via}${plus}.`, { tone: 'ok', duration: 5500 });
+    else status.update(`<b>${dataset.name}</b> · ${formatNumber(features.length, 0)} features${across}${via}${plus}.`, { tone: 'ok', duration: 5500 });
   } catch (err) {
     if (err.name === 'AbortError') status.close();
     else status.update(`Could not fetch ${dataset.name}. ${err.message}`, { tone: 'error', duration: 8000 });
@@ -541,20 +626,22 @@ function datasetRow(dataset) {
 
   const actions = [];
   if (loading) {
-    actions.push(miniBtn('✕', 'Cancel this fetch', () => {
+    // Stopping a download and deleting the layer it produced are different
+    // enough to deserve different marks — a cross dismisses, a bin destroys.
+    actions.push(miniBtn(uiIcon('close'), 'Cancel this fetch', () => {
       inflight.get(dataset.slug)?.abort();
       inflight.delete(dataset.slug);
       render();
     }));
   }
   if (segs) {
-    actions.push(miniBtn(expanded.has(dataset.slug) ? '▴' : '▾', 'Choose which types to show', () => {
+    actions.push(miniBtn(chevron(expanded.has(dataset.slug)), 'Choose which types to show', () => {
       if (expanded.has(dataset.slug)) expanded.delete(dataset.slug);
       else expanded.add(dataset.slug);
       render();
     }));
   }
-  if (added) actions.push(miniBtn('✕', 'Remove this layer', () => toggleDataset(dataset)));
+  if (added) actions.push(miniBtn(uiIcon('trash'), 'Remove this layer', () => toggleDataset(dataset), { danger: true }));
 
   const sub = loading
     ? 'Fetching…'
@@ -598,9 +685,11 @@ export function render() {
   const groups = GROUPS.map((g, i) =>
     group(g.label, datasetsInGroup(g.id).map(datasetRow), i === 0));
 
+  const parts = areaParts(area);
+
   fill(pane, [
     head('Data', area
-      ? `Open data for ${area.name}. Click to add; use ▾ to pick which types.`
+      ? `Open data for ${area.name}. Click a dataset to add it.`
       : 'Add open map data, or bring your own file.'),
     area ? null : el('div.panel-section', {}, [
       empty('Open data is fetched for a study area.<br />Pick one first.'),
@@ -610,32 +699,26 @@ export function render() {
       button('Add roads, rivers & settlements', addStarterPack, 'primary', { style: { width: '100%' } }),
       el('p', {
         style: { margin: 0, fontSize: '10.5px', color: 'var(--ink-faint)', lineHeight: '1.45' },
-        text: 'The three layers most maps start with, fetched together.',
+        text: parts.length > 1
+          ? `The three layers most maps start with — fetched for each of your ${parts.length} areas and merged.`
+          : 'The three layers most maps start with, fetched together.',
       }),
-      checkRow(`Clip data to ${area.name}`, state.clipToArea !== false, reclip,
-        'Off keeps the surrounding context that came with the download.'),
+      checkRow(
+        parts.length > 1 ? `Clip data to your ${parts.length} areas` : `Clip data to ${area.name}`,
+        state.clipToArea !== false,
+        reclip,
+        'Off keeps the surrounding context that came with the download.',
+      ),
     ])) : null,
     ...groups,
-    section('Your own data', stack([
-      dropZone(),
-      el('p', {
-        style: { margin: 0, fontSize: '10.5px', color: 'var(--ink-faint)', lineHeight: '1.45' },
-        text: 'Files are read in the browser and never uploaded anywhere.',
-      }),
-    ])),
-    el('div.panel-section', {}, [
-      el('p', {
-        style: { margin: 0, fontSize: '10.5px', lineHeight: '1.5', color: 'var(--ink-faint)' },
-        html: 'Data comes from the public Overpass API — several mirrors, asked in parallel, first answer wins. Downloads are cached, so narrowing the types you want re-filters instantly without fetching again.',
-      }),
-    ]),
+    section('Your own data', stack([dropZone()])),
   ]);
 }
 
 export function initDataPane() {
   pane = $('#pane-data');
   render();
-  subscribe(['layers', 'studyArea'], () => { if (state.activeTool === 'data') render(); });
+  subscribe(['layers', 'studyArea', 'studyAreas'], () => { if (state.activeTool === 'data') render(); });
 }
 
 export { render as renderDataPane };

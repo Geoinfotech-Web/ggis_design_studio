@@ -19,6 +19,10 @@
  *            glyph shown beside the dataset's name in the panel.
  *   dash     a LINE_STYLES id for line work, so a ferry route arrives dashed
  *            because it is not a road and never was.
+ *   width    a line weight in **millimetres on the printed page**, the way a
+ *            desktop GIS states one. Trunk at 0.8 mm over service at 0.25 mm
+ *            is the hierarchy a road map is built on; the thickness control
+ *            scales the whole set and keeps the order.
  *
  * Both are only a starting position; everything stays editable on the layer
  * and on the legend afterwards.
@@ -61,11 +65,12 @@ export const OSM_DATASETS = [
     body: 'way["highway"~"^(trunk|primary|secondary)$"]($bbox);',
     // Strong, well-separated hues on purpose. A road layer drawn in mid-grey
     // on a pale basemap is technically present and practically invisible.
-    // Widths follow the class hierarchy the way a printed road map does.
+    // Widths are millimetres on the printed page, and follow the class
+    // hierarchy the way a printed road map does.
     segments: [
-      { label: 'Trunk',     color: '#c92a2a', width: 3.2, match: { highway: '^trunk' } },
-      { label: 'Primary',   color: '#e8590c', width: 2.6, match: { highway: '^primary' } },
-      { label: 'Secondary', color: '#1971c2', width: 2.0, match: { highway: '^secondary' } },
+      { label: 'Trunk',     color: '#c92a2a', width: 0.8,  match: { highway: '^trunk' } },
+      { label: 'Primary',   color: '#e8590c', width: 0.65, match: { highway: '^primary' } },
+      { label: 'Secondary', color: '#1971c2', width: 0.5,  match: { highway: '^secondary' } },
     ],
   },
   {
@@ -74,12 +79,12 @@ export const OSM_DATASETS = [
     kind: 'line', color: '#64748b', labelField: 'name', heavy: true,
     body: 'way["highway"~"^(tertiary|residential|unclassified|service|track)$"]($bbox);',
     segments: [
-      { label: 'Tertiary',    color: '#0f766e', width: 1.8, match: { highway: '^tertiary' } },
-      { label: 'Residential', color: '#64748b', width: 1.3, match: { highway: '^(residential|unclassified)' } },
-      { label: 'Service',     color: '#94a3b8', width: 1.0, match: { highway: '^service' } },
+      { label: 'Tertiary',    color: '#0f766e', width: 0.45, match: { highway: '^tertiary' } },
+      { label: 'Residential', color: '#64748b', width: 0.32, match: { highway: '^(residential|unclassified)' } },
+      { label: 'Service',     color: '#94a3b8', width: 0.25, match: { highway: '^service' } },
       // An unsurfaced track is not a street, and a dashed line is how every
       // printed map has said so for a century.
-      { label: 'Track',       color: '#a16207', width: 1.0, dash: 'dashed', match: { highway: '^track' } },
+      { label: 'Track',       color: '#a16207', width: 0.25, dash: 'dashed', match: { highway: '^track' } },
     ],
   },
   {
@@ -386,20 +391,14 @@ export const OSM_DATASETS = [
   },
 
   /* ---- Land use --------------------------------------------------- */
-  {
-    slug: 'landuse', name: 'Land use zones', group: 'land', icon: '▩',
-    hint: 'Residential, commercial, industrial, farmland — shown by zone',
-    kind: 'polygon', color: '#a16207', heavy: true, labelField: 'landuse',
-    body: 'nwr["landuse"]($bbox);',
-    segments: [
-      { label: 'Residential', color: '#f9a8d4', match: { landuse: '^residential' } },
-      { label: 'Commercial',  color: '#60a5fa', match: { landuse: '^(commercial|retail)' } },
-      { label: 'Industrial',  color: '#a78bfa', match: { landuse: '^(industrial|quarry|landfill)' } },
-      { label: 'Farmland',    color: '#facc15', match: { landuse: '^(farmland|farmyard|orchard|vineyard|allotments)' } },
-      { label: 'Forest',      color: '#15803d', match: { landuse: '^(forest|meadow|grass|village_green)' } },
-      { label: 'Water',       color: '#38bdf8', match: { landuse: '^(reservoir|basin|salt_pond)' } },
-    ],
-  },
+  // "Land use zones" — a bare `nwr["landuse"]` — used to sit here and was
+  // removed. It matched every tagged polygon in the query box with no
+  // discrimination at all, which on anything larger than a ward is tens of
+  // thousands of overlapping shapes: slow to fetch, slow to draw, and a map
+  // nobody could read underneath it. The specific land-use datasets below and
+  // in the other groups (farmland, forest, industrial sites, cemeteries)
+  // answer the questions people actually had, and answer them at a size the
+  // browser can hold.
   {
     slug: 'farmland', name: 'Farmland & agriculture', group: 'land', icon: '⌗',
     hint: 'Cropland, orchards and plantations',
@@ -427,8 +426,8 @@ export const OSM_DATASETS = [
     kind: 'line', color: '#a21caf', symbol: 'bolt',
     body: 'way["power"~"^(line|minor_line)$"]($bbox);\nnwr["power"~"^(substation|plant|generator)$"]($bbox);',
     segments: [
-      { label: 'Transmission line', color: '#a21caf', width: 2.2, symbol: 'bolt', match: { power: '^line$' } },
-      { label: 'Distribution line', color: '#c026d3', width: 1.4, dash: 'dashed', symbol: 'bolt', match: { power: '^minor_line' } },
+      { label: 'Transmission line', color: '#a21caf', width: 0.55, symbol: 'bolt', match: { power: '^line$' } },
+      { label: 'Distribution line', color: '#c026d3', width: 0.35, dash: 'dashed', symbol: 'bolt', match: { power: '^minor_line' } },
       { label: 'Substation',        color: '#7c3aed', symbol: 'square', match: { power: '^substation' } },
       { label: 'Power station',     color: '#b91c1c', symbol: 'factory', match: { power: '^(plant|generator)' } },
     ],
