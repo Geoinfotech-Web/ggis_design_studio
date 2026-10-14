@@ -3,11 +3,14 @@
   "version": "3.0.0",
   "private": true,
   "type": "module",
-  "description": "Template-based map design studio — Canva-style cartography with OSM data and Earth Engine analysis",
+  "description": "Template-based map design studio \u2014 Canva-style cartography with OSM data and Earth Engine analysis",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
+    "dev": "node init && vite",
+    "build": "node init && vite build",
     "preview": "vite preview",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "coverage": "vitest run --coverage",
     "cache": "node server/cache-server.mjs",
     "accounts": "node server/account-server.mjs",
     "prefetch": "node server/prefetch.mjs",
@@ -34,10 +37,12 @@
     "shpjs": "^6.1.0"
   },
   "devDependencies": {
+    "@vitest/coverage-v8": "^5.0.3",
     "autoprefixer": "^10.4.20",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.17",
-    "vite": "^6.0.7"
+    "vite": "^6.0.7",
+    "vitest": "^5.0.3"
   },
   "optionalDependencies": {
     "@anthropic-ai/sdk": "^0.115.0"
