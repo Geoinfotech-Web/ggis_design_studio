@@ -6,9 +6,12 @@
  * 40 in an hour's time, or reply "the server is probably too busy". Waiting
  * on one and only trying another *after* it fails is the worst of both.
  *
- * So this client races: it asks the first mirror, and if nothing has come
- * back after a short grace period it asks the next one too, keeping whichever
- * answers first and aborting the rest. Responses are cached for the session,
+ * So this client races: it asks the two mirrors that have been answering
+ * best at the same moment, adds the next one if nothing has come back after a
+ * short grace period, keeps whichever answers first and aborts the rest. Every
+ * answer and every failure is remembered, so a mirror that is down is asked
+ * last instead of first — which is the difference between a 9-second fetch
+ * and a 45-second one on a day when the usual first choice is not answering. Responses are cached for the session,
  * obviously oversized requests are refused before they are sent, and every
  * request is cancellable.
  */
@@ -28,8 +31,54 @@ import { hash } from './cache/key.js';
  */
 const cache = new Map();
 
-/** How long to wait for one mirror before also trying the next. */
-const STAGGER_MS = 3500;
+/** How long to wait before also trying the next mirror down the list. */
+const STAGGER_MS = 2500;
+/** How many mirrors are asked at the very start. Two, because the cost of a
+ *  second request is small and the cost of having picked a dead mirror alone
+ *  is the whole wait. The loser is aborted the moment the other answers. */
+const HEDGE = 2;
+
+/* ------------------------------------------------------------------ */
+/* mirror health                                                       */
+/* ------------------------------------------------------------------ */
+const HEALTH_KEY = 'gds.overpass.health.v1';
+/** A failure counts against a mirror for this long, then it gets another go. */
+const PENALTY_MS = 10 * 60 * 1000;
+/** What an unmeasured mirror is assumed to take. */
+const UNKNOWN_MS = 9000;
+
+/** url → { ms: smoothed response time, failedAt: last failure } */
+const health = new Map();
+try {
+  const stored = typeof localStorage === 'undefined' ? null : JSON.parse(localStorage.getItem(HEALTH_KEY) ?? 'null');
+  for (const [url, value] of Object.entries(stored ?? {})) health.set(url, value);
+} catch { /* no storage, or nothing worth keeping */ }
+
+function remember(url, patch) {
+  health.set(url, { ...(health.get(url) ?? {}), ...patch });
+  try { localStorage?.setItem(HEALTH_KEY, JSON.stringify(Object.fromEntries(health))); } catch { /* fine */ }
+}
+
+function noteSuccess(url, ms) {
+  const before = health.get(url)?.ms;
+  // Smoothed, so one slow answer does not demote a mirror that is usually quick.
+  remember(url, { ms: before ? Math.round(before * 0.6 + ms * 0.4) : ms, failedAt: 0 });
+}
+
+const noteFailure = (url) => remember(url, { failedAt: Date.now() });
+
+/** The mirrors, best first: working ones by speed, then recently failed ones. */
+export function rankedMirrors(now = Date.now()) {
+  const score = (url) => {
+    const h = health.get(url) ?? {};
+    const down = h.failedAt && now - h.failedAt < PENALTY_MS;
+    return (down ? 1e9 : 0) + (h.ms ?? UNKNOWN_MS);
+  };
+  return ENDPOINTS.overpass
+    .map((url, index) => ({ url, index, score: score(url) }))
+    .sort((a, b) => a.score - b.score || a.index - b.index)
+    .map((entry) => entry.url);
+}
 /** Server-side query budget. Short on purpose: a wedged query should fail
  *  fast so the race can be won somewhere else. */
 const QUERY_TIMEOUT_S = 25;
@@ -135,6 +184,9 @@ function race(query, { signal, onProgress }) {
   const controller = new AbortController();
   const abortAll = () => controller.abort();
   signal?.addEventListener('abort', abortAll, { once: true });
+  // Decided once per request, so a mirror that fails during this race does
+  // not reshuffle the list underneath it.
+  const mirrors = rankedMirrors();
 
   return new Promise((resolve, reject) => {
     const errors = [];
@@ -154,29 +206,31 @@ function race(query, { signal, onProgress }) {
 
     /** Nothing left running, so an empty answer is the real answer. */
     const settleIfExhausted = () => {
-      if (done < launched || launched < ENDPOINTS.overpass.length) return;
+      if (done < launched || launched < mirrors.length) return;
       if (empty) finish(resolve, empty);
       else finish(reject, new Error(`Every Overpass mirror refused: ${errors.join('; ')}`));
     };
 
     const launch = () => {
-      const url = ENDPOINTS.overpass[launched];
+      const url = mirrors[launched];
       if (url === undefined) return;
       launched += 1;
+      const started = Date.now();
 
-      if (launched > 1) onProgress?.(`Still waiting — also trying ${hostOf(url)}…`);
-      else onProgress?.(`Querying ${hostOf(url)}…`);
+      if (launched > HEDGE) onProgress?.(`Still waiting — also trying ${hostOf(url)}…`);
+      else if (launched === 1) onProgress?.(`Querying ${hostOf(url)}…`);
 
       post(url, query, controller.signal)
         .then((raw) => {
           done += 1;
+          noteSuccess(url, Date.now() - started);
           // An empty result is only trustworthy once nothing else can beat
           // it. A mirror carrying a partial extract answers quickly and
           // legitimately with zero elements outside its own region, and
           // taking that as the winner silently loses everyone else's data.
           if (!(raw.elements ?? []).length) {
             empty = empty ?? { raw, host: hostOf(url) };
-            if (launched < ENDPOINTS.overpass.length) launch();
+            if (launched < mirrors.length) launch();
             else settleIfExhausted();
             return;
           }
@@ -186,15 +240,18 @@ function race(query, { signal, onProgress }) {
         .catch((err) => {
           if (err.name === 'AbortError') return;
           done += 1;
+          noteFailure(url);
           errors.push(err.message);
           // A failure frees the race up immediately.
-          if (launched < ENDPOINTS.overpass.length) launch();
+          if (launched < mirrors.length) launch();
           else settleIfExhausted();
         });
+    };
 
-      if (launched < ENDPOINTS.overpass.length) {
-        timer = setTimeout(launch, STAGGER_MS);
-      }
+    /** Bring the next mirror in if the ones already asked are still silent. */
+    const scheduleNext = () => {
+      if (launched >= mirrors.length) return;
+      timer = setTimeout(() => { launch(); scheduleNext(); }, STAGGER_MS);
     };
 
     if (signal?.aborted) return finish(reject, new DOMException('Aborted', 'AbortError'));
@@ -202,7 +259,8 @@ function race(query, { signal, onProgress }) {
       if (signal?.aborted) finish(reject, new DOMException('Aborted', 'AbortError'));
     }, { once: true });
 
-    launch();
+    for (let i = 0; i < HEDGE; i++) launch();
+    scheduleNext();
   });
 }
 

@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <meta name="description" content="Template-based map design studio — pick a cartographic template, drop in OpenStreetMap data, run Earth Engine analysis, and export a print-ready map." />
-<title>GIS Design Studio — Map templates for everyone</title>
+<title>GIS Design Studio — Make a map worth printing</title>
 
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -17,8 +17,8 @@
      ============================================================ -->
 <div id="landing" class="landing"></div>
 
-<!-- Create dialog — rendered by src/ui/create-modal.js -->
-<div id="create-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="create-title"></div>
+<!-- Sign up / sign in — rendered by src/ui/auth-modal.js, over the blurred landing page -->
+<div id="auth-modal" class="auth-modal"></div>
 
 <!-- ============================================================
      STUDIO
@@ -27,7 +27,7 @@
 
   <header class="studio-header">
     <div class="flex min-w-0 shrink-0 items-center gap-2.5">
-      <button id="back-home" class="brand-mark" title="Back to home" aria-label="Back to home">
+      <button id="back-home" class="brand-mark" title="My projects" aria-label="My projects">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg>
       </button>
       <div class="min-w-0">
@@ -55,13 +55,15 @@
 
     <!-- Left panel (content switches with the rail) -->
     <aside class="side-panel" id="left-panel" aria-live="polite">
-      <section class="panel-pane" data-pane="templates" id="pane-templates"></section>
       <section class="panel-pane" data-pane="area"      id="pane-area"></section>
+      <section class="panel-pane" data-pane="start"     id="pane-start"></section>
+      <section class="panel-pane" data-pane="templates" id="pane-templates"></section>
       <section class="panel-pane" data-pane="data"      id="pane-data"></section>
       <section class="panel-pane" data-pane="analysis"  id="pane-analysis"></section>
       <section class="panel-pane" data-pane="ai"        id="pane-ai"></section>
       <section class="panel-pane" data-pane="elements"  id="pane-elements"></section>
       <section class="panel-pane" data-pane="layers"    id="pane-layers"></section>
+      <section class="panel-pane" data-pane="projects"  id="pane-projects"></section>
     </aside>
 
     <!-- Canvas -->

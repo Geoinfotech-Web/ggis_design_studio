@@ -445,3 +445,179 @@ input[type='range'] { width: 100%; accent-color: var(--accent); }
   .side-panel { transition: none; }
   * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
+
+/* ==================================================================
+   The step-by-step flow: study area → start map → everything else.
+   ================================================================== */
+
+/* Rail: drawn icons, a padlock on what is not open yet, green on what is
+   done. */
+.rail-btn { position: relative; }
+.rail-ico { display: grid; place-items: center; }
+.rail-ico svg { display: block; }
+.rail-btn.is-done { color: var(--leaf); }
+.rail-btn.is-locked { color: var(--ink-faint); cursor: not-allowed; }
+.rail-btn.is-locked:hover { background: transparent; color: var(--ink-faint); }
+.rail-lock {
+  position: absolute; top: 3px; right: 5px; display: grid; place-items: center;
+  color: var(--ink-faint);
+}
+
+/* Header chain. A dashed node is not ready; a filled one is done. */
+.step { padding: 4px 12px; border: 1px solid var(--line-strong); color: var(--ink-soft); background: var(--surface); }
+.step.is-done { color: var(--leaf); background: color-mix(in srgb, var(--leaf) 12%, var(--surface)); border-color: color-mix(in srgb, var(--leaf) 45%, var(--surface)); }
+.step.is-active { color: var(--accent-ink); background: var(--accent); border-color: var(--accent); }
+.step.is-todo { border-style: dashed; color: var(--ink-faint); background: transparent; }
+.step.is-todo:hover { background: transparent; color: var(--ink-soft); }
+.step-sep { color: var(--ink-faint); font-size: 12px; }
+
+/* Account */
+.account-chip {
+  display: grid; place-items: center; height: 30px; min-width: 30px; padding: 0 6px; flex: none;
+  border-radius: 999px; background: var(--accent-deep); color: var(--accent-ink);
+  font-size: 11.5px; font-weight: 800; letter-spacing: 0.02em;
+}
+
+/* Until the map is started the right-hand panel is there but quiet, and
+   says what will open it. */
+.studio.is-locked #right-panel { position: relative; background: var(--surface-2); }
+.studio.is-locked #right-panel > * { opacity: 0.32; filter: grayscale(1); pointer-events: none; user-select: none; }
+.studio.is-locked #right-panel::before {
+  content: 'Not available yet\A' attr(data-lock);
+  white-space: pre-line; display: block; position: sticky; top: 0; z-index: 2;
+  margin: 12px; padding: 12px 13px; border-radius: var(--radius);
+  border: 1px dashed var(--line-strong); background: var(--surface);
+  font-size: 12px; line-height: 1.5; color: var(--ink-soft);
+}
+/* There is no page to lay out until the map has been started. */
+.studio.is-locked .artboard { visibility: hidden; }
+
+/* Study area: a boundary of your own */
+.upload-zone {
+  display: flex; flex-direction: column; gap: 5px; width: 100%; text-align: left;
+  padding: 14px; border-radius: var(--radius); border: 1px dashed var(--ink-faint);
+  background: var(--surface-2); color: var(--ink); font: inherit; cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.upload-zone:hover, .upload-zone.is-over { border-color: var(--accent); background: var(--accent-wash); }
+.upload-zone:disabled { cursor: progress; opacity: 0.7; }
+.upload-zone strong { font-size: 12.5px; font-weight: 700; }
+.upload-zone span { font-size: 11px; line-height: 1.45; color: var(--ink-soft); }
+
+/* Start map */
+.start-area {
+  display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+  border-radius: 10px; border: 1px solid color-mix(in srgb, var(--leaf) 45%, var(--surface));
+  background: color-mix(in srgb, var(--leaf) 10%, var(--surface)); color: var(--leaf);
+}
+.start-area-tick { display: grid; place-items: center; flex: none; }
+.start-area-name { flex: 1; min-width: 0; font-size: 12px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.start-change {
+  border: 0; background: transparent; padding: 4px 2px; font: inherit; font-size: 11.5px; font-weight: 700;
+  color: inherit; text-decoration: underline; cursor: pointer;
+}
+.start-options { display: flex; flex-direction: column; gap: 9px; }
+.start-option { border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--surface); overflow: hidden; }
+.start-option.is-open { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.start-option-head {
+  display: flex; align-items: flex-start; gap: 11px; width: 100%; text-align: left;
+  padding: 11px 12px; border: 0; background: transparent; color: var(--ink); font: inherit; cursor: pointer;
+}
+.start-option-head:hover { background: var(--line-soft); }
+.start-option.is-open .start-option-head { background: var(--accent-wash); }
+.start-ico {
+  display: grid; place-items: center; height: 36px; width: 36px; flex: none;
+  border-radius: 9px; background: var(--line-soft); color: var(--ink-soft);
+}
+.start-option.is-open .start-ico { background: var(--accent); color: var(--accent-ink); }
+.start-option-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.start-option-text strong { font-size: 13.5px; font-weight: 700; }
+.start-option-text small { font-size: 11.5px; line-height: 1.4; color: var(--ink-soft); }
+.start-option-body { padding: 10px 12px 12px; border-top: 1px solid var(--line); }
+.start-option-body .pill-row { padding: 0 0 8px; }
+.tpl-grid--flush { padding: 0; }
+.start-note { margin: 0 0 10px; font-size: 11.5px; line-height: 1.5; color: var(--ink-soft); }
+.start-more {
+  margin-top: 8px; border: 0; background: transparent; padding: 4px 0; font: inherit;
+  font-size: 12px; font-weight: 700; color: var(--accent-deep); cursor: pointer;
+}
+.start-current { display: flex; align-items: center; gap: 11px; }
+.start-current .tpl-thumb { width: 86px; height: 60px; flex: none; border-radius: 8px; border: 1px solid var(--line); }
+.start-current strong { display: block; margin-top: 2px; font-size: 13.5px; }
+
+.sheet-list { display: flex; flex-direction: column; gap: 8px; }
+.sheet-row { display: flex; align-items: center; gap: 9px; }
+.sheet-thumb {
+  height: 48px; width: 62px; flex: none; padding: 0; overflow: hidden; cursor: zoom-in;
+  border: 1px solid var(--line); border-radius: 7px; background: var(--line-soft);
+}
+.sheet-thumb img { display: block; height: 100%; width: 100%; object-fit: cover; }
+.sheet-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.sheet-text strong { font-size: 12px; font-weight: 700; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sheet-text span { font-size: 10.5px; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sheet-text .sheet-tpl { color: var(--accent-deep); }
+.sheet-row .btn-soft { flex: none; padding: 5px 9px; font-size: 11px; }
+
+/* My projects */
+.proj-sync-warn {
+  margin: 10px 14px 0; padding: 8px 10px; border-radius: 9px; font-size: 11.5px; line-height: 1.45;
+  background: var(--warn-bg); color: var(--warn-ink); border: 1px solid color-mix(in srgb, var(--warn-ink) 30%, transparent);
+}
+.proj-list { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.proj-card { position: relative; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.proj-card.is-current { border-color: var(--accent-bright); background: var(--accent-wash); }
+.proj-open {
+  display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+  padding: 8px 40px 8px 8px; border: 0; border-radius: inherit; background: transparent; color: var(--ink);
+  font: inherit; cursor: pointer;
+}
+.proj-card:not(.is-current) .proj-open:hover { background: var(--line-soft); }
+.proj-card.is-current .proj-open { cursor: default; }
+.proj-thumb { height: 44px; width: 60px; flex: none; overflow: hidden; border-radius: 6px; border: 1px solid var(--line); background: var(--line-soft); }
+.proj-thumb img { display: block; height: 100%; width: 100%; object-fit: cover; }
+.proj-thumb .pv { height: 100%; border-radius: 0; }
+.proj-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.proj-text strong { font-size: 12.5px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.proj-text span { font-size: 10.5px; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.proj-badge {
+  flex: none; font-size: 10px; font-weight: 800; color: var(--leaf);
+  background: color-mix(in srgb, var(--leaf) 14%, var(--surface)); border-radius: 999px; padding: 2px 8px;
+}
+.proj-delete { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); height: 28px; width: 28px; }
+
+/* ==================================================================
+   Getting at the map underneath the page
+   ================================================================== */
+
+/* A neatline is its line. The inside is the map's: it can be panned,
+   zoomed and clicked straight through the frame. */
+.el.el--frame { pointer-events: none; cursor: default; }
+.el--frame .el-edge { position: absolute; pointer-events: auto; cursor: grab; }
+.el--frame .el-edge[data-edge='top']    { left: 0; right: 0; top: -5px; height: 12px; }
+.el--frame .el-edge[data-edge='bottom'] { left: 0; right: 0; bottom: -5px; height: 12px; }
+.el--frame .el-edge[data-edge='left']   { top: 0; bottom: 0; left: -5px; width: 12px; }
+.el--frame .el-edge[data-edge='right']  { top: 0; bottom: 0; right: -5px; width: 12px; }
+.el--frame .el-handle { pointer-events: auto; }
+.el--frame.is-locked .el-edge { cursor: default; }
+/* The outline cannot follow :hover on a box that ignores the pointer, so the
+   edges light it instead. */
+.el--frame:has(.el-edge:hover) { outline-color: rgba(56, 189, 248, 0.85); }
+
+/* Pan mode: nothing on the page takes the pointer, so the map has all of it. */
+.studio.is-panning .el,
+.studio.is-panning .el--frame .el-edge,
+.studio.is-panning .el-handle { pointer-events: none; }
+.studio.is-panning .el { outline-color: transparent; }
+.studio.is-panning .map-root .maplibregl-canvas { cursor: grab; }
+.studio.is-panning .map-root .maplibregl-canvas:active { cursor: grabbing; }
+.studio.is-panning .artboard { border-color: var(--ember); }
+.control-btn--pan { display: inline-flex; align-items: center; gap: 5px; }
+.control-btn--pan span { display: grid; place-items: center; }
+
+/* Data rows: already downloaded for this study area. */
+.ready-tag {
+  display: inline-block; margin-left: 6px; padding: 1px 5px; vertical-align: 1px;
+  border-radius: 5px; font-size: 8.5px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase;
+  border: 1px solid color-mix(in srgb, var(--leaf) 45%, var(--surface));
+  background: color-mix(in srgb, var(--leaf) 12%, var(--surface)); color: var(--leaf);
+}

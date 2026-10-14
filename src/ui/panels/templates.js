@@ -17,6 +17,7 @@ import {
 import { applyLook, setBasemap, applyBasemapGroups, applyTerrain, applyBuildingExtrusion, resizeSoon } from '../../core/map.js';
 import { layoutArtboard, renderElements, hint, paperDims } from '../artboard.js';
 import { formatNumber } from '../../core/geo.js';
+import { setTool } from '../tool.js';
 
 let filterCategory = 'all';
 let pane;
@@ -49,7 +50,8 @@ export function renderTemplatesPane() {
   for (const tpl of templatesInCategory(filterCategory)) grid.append(card(tpl));
 
   fill(pane, [
-    head('Templates', 'Start from a finished design, then change anything you like.'),
+    head('Map style', 'Switch template, basemap, page size and finish. Your study area and data stay.'),
+    section('', [button('Back to Start map', () => setTool('start'), 'ghost', { style: { width: '100%' } })]),
     pillRow(TEMPLATE_CATEGORIES, filterCategory, (id) => { filterCategory = id; renderTemplatesPane(); }),
     grid,
     section('Basemap', basemapControls()),

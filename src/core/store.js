@@ -18,7 +18,14 @@ export const state = {
   view: 'landing',                     // 'landing' | 'studio'
   projectId: null,                     // entry in the saved project library
   projectName: 'Untitled map',
-  activeTool: 'templates',             // which left panel is showing
+  activeTool: 'area',                  // which left panel is showing
+  // Set once the user has picked a starting point — new, template or
+  // contributor layout. Until then only the study area and Start map are
+  // open; see core/flow.js.
+  mapStarted: false,
+  // While on, page elements let the pointer through to the map, so it
+  // can be dragged from anywhere. Interface state: not saved, not undone.
+  panMode: false,
 
   templateId: 'quiet-canvas',
 
@@ -146,15 +153,148 @@ export const canRedo = () => future.length > 0;
 /* ------------------------------------------------------------------ */
 /* project library — many projects, saved in this browser              */
 /* ------------------------------------------------------------------ */
-const LIBRARY_KEY = 'gds.projects.v3';
+const SHARED_LIBRARY_KEY = 'gds.projects.v3';   // from before there were accounts
+let LIBRARY_KEY = SHARED_LIBRARY_KEY;
+
+/**
+ * Point the library at one account's projects.
+ *
+ * Projects saved before sign-in existed sit under the shared key. The first
+ * account to sign in on this browser inherits them — they were made here, by
+ * whoever is at this machine — and from then on every account has its own.
+ * @param {string|null} userId
+ */
+export function setLibraryOwner(userId) {
+  LIBRARY_KEY = userId ? `${SHARED_LIBRARY_KEY}.${userId}` : SHARED_LIBRARY_KEY;
+  if (!userId) return;
+  try {
+    const shared = localStorage.getItem(SHARED_LIBRARY_KEY);
+    if (shared && localStorage.getItem(LIBRARY_KEY) === null) {
+      localStorage.setItem(LIBRARY_KEY, shared);
+      localStorage.removeItem(SHARED_LIBRARY_KEY);
+    }
+  } catch { /* storage blocked: the library simply starts empty */ }
+}
 const LEGACY_KEY = 'gds.project.v3';      // the old single-slot format
 const PERSIST_KEYS = [
   'projectName', 'templateId', 'basemap', 'basemapGroups', 'mapView', 'terrain',
-  'buildings3d', 'mapLook', 'page', 'elements', 'studyAreas', 'clipToArea',
+  'buildings3d', 'mapLook', 'page', 'elements', 'studyAreas', 'clipToArea', 'mapStarted',
 ];
 
 /** Beyond this the oldest project is dropped — localStorage is finite. */
 export const MAX_PROJECTS = 24;
+
+/* ------------------------------------------------------------------ */
+/* the account server's copy                                           */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The library this browser keeps is a working copy; the account server holds
+ * the real one, which is what makes the same maps appear on every computer an
+ * account signs in from. Reads stay synchronous and local, so nothing in the
+ * studio waits on the network to draw a list. Every save is written here first
+ * and then sent up; signing in pulls down whatever was saved elsewhere.
+ */
+const PROJECTS_API = '/api/account/projects';
+
+/** Saves still on their way up, by project — only the newest is worth sending. */
+const outbox = new Map();
+let pushing = false;
+
+async function flushOutbox() {
+  if (pushing) return;
+  pushing = true;
+  try {
+    while (outbox.size) {
+      const [id, entry] = outbox.entries().next().value;
+      outbox.delete(id);
+      try {
+        const res = await fetch(`${PROJECTS_API}/${encodeURIComponent(id)}`, {
+          method: 'PUT',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(entry),
+        });
+        // 409 means a newer copy is already up there; nothing to retry.
+        if (!res.ok && res.status !== 409 && res.status !== 413) throw new Error(String(res.status));
+        syncFailed = false;
+      } catch {
+        // Offline, or the service is down: keep it, and try again shortly.
+        if (!outbox.has(id)) outbox.set(id, entry);
+        syncFailed = true;
+        setTimeout(flushOutbox, 15000);
+        break;
+      }
+    }
+  } finally {
+    pushing = false;
+  }
+}
+
+let syncFailed = false;
+/** True when the last attempt to reach the server failed — the panel says so. */
+export const librarySyncFailing = () => syncFailed || outbox.size > 0;
+
+function pushProject(entry) {
+  outbox.set(entry.id, entry);
+  flushOutbox();
+}
+
+/**
+ * Bring this browser's copy and the server's into agreement, newest version
+ * of each map winning. Maps only here (made offline, or before accounts were
+ * on the server) are sent up; maps only there are brought down.
+ *
+ * @param {{legacyKeys?: string[]}} [opts]  older per-browser libraries for this
+ *        same person, carried up once and then retired.
+ * @returns {Promise<{ok: boolean, pulled: number, pushed: number}>}
+ */
+export async function syncLibrary({ legacyKeys = [] } = {}) {
+  let remote;
+  try {
+    const res = await fetch(`${PROJECTS_API}?full=1`, { credentials: 'same-origin' });
+    if (!res.ok) throw new Error(String(res.status));
+    remote = (await res.json()).projects ?? [];
+  } catch {
+    syncFailed = true;
+    return { ok: false, pulled: 0, pushed: 0 };
+  }
+
+  const legacy = legacyKeys.flatMap((key) => {
+    try { return JSON.parse(localStorage.getItem(key) ?? '[]'); } catch { return []; }
+  });
+  const local = [...readLibrary(), ...legacy];
+
+  const byId = new Map();
+  for (const entry of [...remote, ...local]) {
+    const have = byId.get(entry.id);
+    if (!have || (entry.savedAt ?? 0) > (have.savedAt ?? 0)) byId.set(entry.id, entry);
+  }
+  const remoteAt = new Map(remote.map((entry) => [entry.id, entry.savedAt ?? 0]));
+  const merged = [...byId.values()].sort((a, b) => b.savedAt - a.savedAt);
+
+  let pushed = 0;
+  for (const entry of merged) {
+    if ((remoteAt.get(entry.id) ?? -1) < (entry.savedAt ?? 0) && entry.doc) { outbox.set(entry.id, entry); pushed += 1; }
+  }
+  writeLibrary(merged.slice(0, MAX_PROJECTS));
+  await flushOutbox();
+  if (!outbox.size) {
+    legacyKeys.forEach((key) => { try { localStorage.removeItem(key); } catch { /* fine */ } });
+    syncFailed = false;
+  }
+  return { ok: true, pulled: remote.filter((r) => !local.some((l) => l.id === r.id)).length, pushed };
+}
+
+/** A project this browser has no copy of — its thumbnail-only stub, say. */
+export async function fetchProject(id) {
+  try {
+    const res = await fetch(`${PROJECTS_API}/${encodeURIComponent(id)}`, { credentials: 'same-origin' });
+    return res.ok ? (await res.json()).project : null;
+  } catch {
+    return null;
+  }
+}
 
 const newId = () => `p_${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`;
 
@@ -181,7 +321,7 @@ function writeLibrary(list) {
       return { ok: true, trimmed: attempt.length < list.length || attempt.some((p, i) => !p.thumb && list[i].thumb) };
     } catch { /* try a smaller payload */ }
   }
-  return { ok: false, error: 'This browser is out of storage space for saved projects. Delete a few from the home page.' };
+  return { ok: false, error: 'This browser is out of storage space for saved projects. Delete a few from My projects.' };
 }
 
 let migrated = false;
@@ -256,6 +396,10 @@ function elementsAreUntouched() {
  * already, which from then on keeps itself up to date.
  */
 export function hasWork() {
+  // Until a starting point is chosen there is no page at all, so an empty
+  // page is not an edit — only a study area (or a project already saved)
+  // makes this worth keeping.
+  if (!state.mapStarted) return Boolean(state.projectId || state.studyArea || state.layers.length);
   return Boolean(
     state.projectId
     || state.studyArea
@@ -286,6 +430,7 @@ export function saveProject({ thumbnail, name } = {}) {
   if (!result.ok) return result;
 
   if (state.projectId !== id) set({ projectId: id }, { history: false });
+  pushProject(entry);
   return { ok: true, id };
 }
 
@@ -297,6 +442,11 @@ export function saveProjectAs(name, thumbnail) {
 
 export function deleteProject(id) {
   const result = writeLibrary(readLibrary().filter((p) => p.id !== id));
+  outbox.delete(id);
+  fetch(`${PROJECTS_API}/${encodeURIComponent(id)}`, { method: 'DELETE', credentials: 'same-origin' }).catch(() => {
+    // It will reappear from the server on the next sign-in; say so rather than pretend.
+    syncFailed = true;
+  });
   if (state.projectId === id) set({ projectId: null }, { history: false });
   return result;
 }

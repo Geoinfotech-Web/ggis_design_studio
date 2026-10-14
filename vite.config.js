@@ -10,6 +10,13 @@ export default defineConfig({
       // deal with CORS. When the cache server is not running this fails
       // fast, the client treats it as a miss, and data comes live from
       // Overpass and Overture exactly as it did before.
+      // Accounts and saved maps (server/account-server.mjs). Same-origin, so
+      // the session cookie needs no CORS.
+      '/api/account': {
+        target: 'http://localhost:8789',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/account/, ''),
+      },
       '/api/cache': {
         target: 'http://localhost:8788',
         changeOrigin: true,

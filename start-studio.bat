@@ -25,10 +25,13 @@ if not exist node_modules (
 echo Starting geodata cache server on http://localhost:8788 ...
 start "GIS Studio - cache server :8788" cmd /k "cd /d ""%~dp0"" && node server/cache-server.mjs"
 
+echo Starting account server on http://localhost:8789 ...
+start "GIS Studio - accounts :8789" cmd /k "cd /d ""%~dp0"" && node server/account-server.mjs"
+
 echo Starting studio on http://localhost:5173 ...
 start "GIS Studio - Vite :5173" cmd /k "cd /d ""%~dp0"" && npm run dev"
 
 echo.
-echo Both servers are starting in their own windows.
+echo The three servers are starting in their own windows.
 echo Close those windows (or press Ctrl+C in them) to stop the servers.
 timeout /t 5 >nul

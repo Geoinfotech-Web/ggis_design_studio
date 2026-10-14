@@ -8,7 +8,7 @@
  */
 
 import { $, el } from '../core/dom.js';
-import { state, set, touch, checkpoint } from '../core/store.js';
+import { state, set, touch, checkpoint, subscribe } from '../core/store.js';
 import { PAPER_SIZES, paperDimsLabel } from '../core/constants.js';
 import { renderElementDom, elementLabel } from '../layout/elements.js';
 import { currentMetresPerPixel } from '../layout/derive.js';
@@ -95,10 +95,22 @@ export function layoutArtboard() {
 /* element DOM                                                         */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Elements that are an outline around the map rather than a thing on it. A
+ * neatline covers the whole page, and if its inside took the pointer the map
+ * underneath could not be panned or zoomed at all. So only its edge is the
+ * element: grab the line to move or select it, and everything inside the
+ * line belongs to the map.
+ */
+const FRAME_TYPES = new Set(['neatline']);
+const EDGES = ['top', 'right', 'bottom', 'left'];
+
 function buildNode(elm) {
-  const node = el('div.el', { dataset: { id: elm.id } }, [
+  const frame = FRAME_TYPES.has(elm.type);
+  const node = el(frame ? 'div.el.el--frame' : 'div.el', { dataset: { id: elm.id, type: elm.type } }, [
     el('div.el-tag', { text: elementLabel(elm) }),
     el('div.el-inner'),
+    ...(frame ? EDGES.map((edge) => el('div.el-edge', { dataset: { edge } })) : []),
     ...HANDLES.map((h) => el('div.el-handle', { dataset: { h } })),
   ]);
   node.addEventListener('pointerdown', (e) => onPointerDown(e, elm.id));
@@ -375,7 +387,7 @@ export function initArtboard() {
   window.addEventListener('keydown', (event) => {
     if (state.view !== 'studio') return;
     const target = event.target;
-    if (target.matches('input, textarea, select, [contenteditable]')) return;
+    if (target?.matches?.('input, textarea, select, [contenteditable]')) return;
     const id = state.selectedElementId;
     if (!id) return;
     const elm = state.elements.find((e) => e.id === id);
@@ -392,8 +404,57 @@ export function initArtboard() {
     updateElement(id, { x: Number((elm.x + move[0]).toFixed(2)), y: Number((elm.y + move[1]).toFixed(2)) }, { history: false });
   });
 
+  initPanMode();
   layoutArtboard();
   renderElements();
+}
+
+/* ------------------------------------------------------------------ */
+/* pan mode                                                            */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Turn pan mode on or off. In pan mode nothing on the page can be grabbed,
+ * so a drag anywhere moves the map — the way out of a page crowded enough
+ * that there is no bare map left to hold.
+ */
+export function setPanMode(on) {
+  set({ panMode: Boolean(on) }, { history: false });
+}
+
+let panHeldBySpace = false;
+
+function initPanMode() {
+  const apply = () => {
+    $('#studio')?.classList.toggle('is-panning', state.panMode);
+    if (state.panMode && state.selectedElementId) set({ selectedElementId: null }, { history: false });
+  };
+  subscribe(['panMode'], apply);
+  apply();
+
+  const typing = (target) => target?.matches?.('input, textarea, select, [contenteditable]');
+
+  // Hold Space to pan for a moment, the convention every design tool shares.
+  window.addEventListener('keydown', (event) => {
+    if (state.view !== 'studio' || typing(event.target)) return;
+    if (event.key === 'Escape' && state.panMode) { panHeldBySpace = false; setPanMode(false); return; }
+    if (event.code !== 'Space' || event.repeat) return;
+    // A focused button would otherwise be "clicked" by the same key press.
+    if (event.target?.matches?.('button, a, summary')) return;
+    event.preventDefault();
+    if (!state.panMode) { panHeldBySpace = true; setPanMode(true); }
+  });
+  window.addEventListener('keyup', (event) => {
+    if (event.code !== 'Space' || !panHeldBySpace) return;
+    panHeldBySpace = false;
+    setPanMode(false);
+  });
+  // Letting go of Space in another window must not leave the page frozen.
+  window.addEventListener('blur', () => {
+    if (!panHeldBySpace) return;
+    panHeldBySpace = false;
+    setPanMode(false);
+  });
 }
 
 /** Show a transient hint over the canvas. */

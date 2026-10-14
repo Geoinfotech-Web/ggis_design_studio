@@ -16,20 +16,43 @@ import { boundsFromBbox, formatArea } from '../core/geo.js';
 import { exportPng, exportPdf, thumbnailDataUrl } from '../export/render.js';
 import { setTool } from './tool.js';
 import { themeToggle } from './theme.js';
-import { renderElements, layoutArtboard, paperDims } from './artboard.js';
+import { toolLocked, studioLocked, lockReason } from '../core/flow.js';
+import { currentUser, initials } from '../core/auth.js';
+import { uiIcon } from './ui-icons.js';
+import { renderElements, layoutArtboard, paperDims, setPanMode, hint } from './artboard.js';
 
 /* ------------------------------------------------------------------ */
 /* tool rail                                                           */
 /* ------------------------------------------------------------------ */
+/**
+ * The rail, in the order a map is made. `also` lists panels that belong to a
+ * rail item without having one of their own: the style, basemap and page
+ * settings open from Start map, so the rail keeps Start map lit for them.
+ */
 const TOOLS = [
-  { id: 'templates', icon: '◫', label: 'Templates' },
-  { id: 'area',      icon: '◎', label: 'Area' },
-  { id: 'data',      icon: '≣', label: 'Data' },
-  { id: 'analysis',  icon: '◐', label: 'Analysis' },
-  { id: 'ai',        icon: '✧', label: 'Assistant' },
-  { id: 'elements',  icon: '✥', label: 'Elements' },
-  { id: 'layers',    icon: '❒', label: 'Layers' },
+  { id: 'area',     label: 'Study area',   done: () => Boolean(state.studyArea),
+    d: 'M12 21s-6-5.3-6-10a6 6 0 1 1 12 0c0 4.7-6 10-6 10zM12 13a2 2 0 1 0 0-4 2 2 0 0 0 0 4z' },
+  { id: 'start',    label: 'Start map',    done: () => Boolean(state.mapStarted), also: ['templates'],
+    d: 'M12 5v14M5 12h14' },
+  { id: 'data',     label: 'Data',
+    d: 'M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3zM4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3' },
+  { id: 'analysis', label: 'Analysis',
+    d: 'M4 20V4M4 20h16M8 16l3.5-5 3 2.5L19 7' },
+  { id: 'elements', label: 'Elements',
+    d: 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z' },
+  { id: 'layers',   label: 'Layers',
+    d: 'M12 3l9 5-9 5-9-5 9-5zM3 13l9 5 9-5' },
+  { id: 'projects', label: 'My projects',
+    d: 'M3 7h6l2 2h10v10H3z' },
+  { id: 'ai',       label: 'AI assistant',
+    d: 'M12 3l2 6 6 2-6 2-2 6-2-6-6-2 6-2z' },
 ];
+
+const railIcon = (d) => el('span.rail-ico', {
+  html: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${d}"/></svg>`,
+});
+
+const isActiveTool = (tool) => state.activeTool === tool.id || Boolean(tool.also?.includes(state.activeTool));
 
 /* ------------------------------------------------------------------ */
 /* narrow-screen sheets                                                */
@@ -59,12 +82,20 @@ function renderRail() {
   const rail = $('#tool-rail');
   if (!rail) return;
   fill(rail, TOOLS.map((tool) => {
-    const btn = el('button.rail-btn', { type: 'button', title: tool.label }, [
-      el('span.rail-ico', { text: tool.icon }),
+    const locked = toolLocked(tool.id);
+    const active = isActiveTool(tool);
+    const btn = el('button.rail-btn', {
+      type: 'button',
+      title: locked ? `${tool.label} — locked. ${lockReason()}` : tool.label,
+      'aria-disabled': locked ? 'true' : null,
+    }, [
+      railIcon(tool.d),
       el('span', { text: tool.label }),
+      locked ? el('span.rail-lock', { 'aria-hidden': 'true' }, [uiIcon('lock', 11)]) : null,
     ]);
-    const active = state.activeTool === tool.id;
     btn.classList.toggle('is-active', active);
+    btn.classList.toggle('is-locked', locked);
+    btn.classList.toggle('is-done', !active && !locked && Boolean(tool.done?.()));
     btn.addEventListener('click', () => {
       // On a phone the rail doubles as the panel's open/close control:
       // tapping the tool you are already in puts the map back.
@@ -72,6 +103,7 @@ function renderRail() {
         setPanelOpen(!studioEl()?.classList.contains('is-panel-open'));
         return;
       }
+      // setTool() explains itself and redirects when the tool is locked.
       setTool(tool.id);
       if (narrow()) setPanelOpen(true);
     });
@@ -88,12 +120,19 @@ function showPane() {
 /* ------------------------------------------------------------------ */
 /* guided steps                                                        */
 /* ------------------------------------------------------------------ */
+/**
+ * The chain across the header: where you are in making the map. A filled node
+ * is done, the solid one is where you are, and a dashed one is not ready yet —
+ * the same reading as a model diagram, where a hollow step has not got its
+ * inputs.
+ */
+let exported = false;
 const STEPS = [
-  { id: 'templates', label: 'Style',    done: () => Boolean(state.templateId) },
-  { id: 'area',      label: 'Area',     done: () => Boolean(state.studyArea) },
-  { id: 'data',      label: 'Data',     done: () => state.layers.some((l) => l.source === 'osm' || l.source === 'overture' || l.source === 'upload') },
-  { id: 'analysis',  label: 'Analysis', done: () => state.analysisRuns.length > 0 },
-  { id: 'elements',  label: 'Design',   done: () => state.elements.length > 0 },
+  { id: 'area',     label: 'Study area', tools: ['area'],                done: () => Boolean(state.studyArea) },
+  { id: 'start',    label: 'Start map',  tools: ['start', 'templates'],  done: () => Boolean(state.mapStarted) },
+  { id: 'data',     label: 'Data',       tools: ['data', 'analysis'],    done: () => state.layers.some((l) => l.source === 'osm' || l.source === 'overture' || l.source === 'upload') },
+  { id: 'elements', label: 'Compose',    tools: ['elements', 'layers'],  done: () => exported },
+  { id: 'export',   label: 'Export',     tools: [],                      done: () => exported },
 ];
 
 function renderSteps() {
@@ -101,19 +140,45 @@ function renderSteps() {
   if (!strip) return;
   const children = [];
   STEPS.forEach((step, i) => {
+    const locked = step.id === 'export' ? studioLocked() : toolLocked(step.id);
+    const active = step.tools.includes(state.activeTool);
     const li = el('li');
-    const btn = el('button.step', { type: 'button' }, [
-      el('span.step-num', { text: String(i + 1) }),
+    const btn = el('button.step', { type: 'button', title: locked ? lockReason() : step.label }, [
       el('span', { text: step.label }),
     ]);
-    btn.classList.toggle('is-active', state.activeTool === step.id);
-    btn.classList.toggle('is-done', step.done() && state.activeTool !== step.id);
-    btn.addEventListener('click', () => setTool(step.id));
+    btn.classList.toggle('is-active', active);
+    btn.classList.toggle('is-done', !active && !locked && step.done());
+    btn.classList.toggle('is-todo', locked);
+    btn.addEventListener('click', () => {
+      if (step.id !== 'export') { setTool(step.id); return; }
+      if (studioLocked()) notify.info(lockReason(), { duration: 4200 });
+      else runExport('pdf');
+    });
     li.append(btn);
     children.push(li);
-    if (i < STEPS.length - 1) children.push(el('li.step-sep', { text: '›' }));
+    if (i < STEPS.length - 1) children.push(el('li.step-sep', { 'aria-hidden': 'true', text: '→' }));
   });
   fill(strip, children);
+}
+
+/**
+ * Everything that changes when the studio opens up or closes again: the
+ * right-hand panel goes quiet, export waits, and a panel that has just
+ * become unavailable hands over to the step that will reopen it.
+ */
+function syncLock() {
+  const locked = studioLocked();
+  studioEl()?.classList.toggle('is-locked', locked);
+  const right = $('#right-panel');
+  if (right) {
+    if (locked) right.dataset.lock = lockReason();
+    else delete right.dataset.lock;
+  }
+  for (const id of ['#export-png-btn', '#export-pdf-btn']) {
+    const btn = $(id);
+    if (btn) btn.disabled = locked;
+  }
+  if (toolLocked(state.activeTool)) set({ activeTool: state.studyArea ? 'start' : 'area' }, { history: false });
 }
 
 /* ------------------------------------------------------------------ */
@@ -144,6 +209,25 @@ function renderMapControls() {
   })()));
 
   const viewCard = el('div.control-card', {}, [
+    (() => {
+      const btn = el('button.control-btn.control-btn--pan', {
+        type: 'button',
+        'aria-pressed': String(state.panMode),
+        title: state.panMode
+          ? 'Pan mode is on — drag anywhere to move the map. Click to go back to arranging the page (Esc).'
+          : 'Drag the map from anywhere, even through page elements. You can also hold Space.',
+      }, [
+        el('span', { html: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v18M3 12h18M12 3l-3 3M12 3l3 3M12 21l-3-3M12 21l3-3M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3"/></svg>' }),
+        state.panMode ? 'Panning' : 'Pan map',
+      ]);
+      btn.classList.toggle('is-active', state.panMode);
+      btn.addEventListener('click', () => {
+        const on = !state.panMode;
+        setPanMode(on);
+        if (on) hint('<b>Pan mode</b> — drag anywhere to move the map. Press <b>Esc</b> or click <b>Panning</b> to arrange the page again.', 5200);
+      });
+      return btn;
+    })(),
     (() => {
       const btn = el('button.control-btn', { type: 'button', text: 'Fit area', title: 'Zoom to the study area' });
       btn.addEventListener('click', () => {
@@ -205,6 +289,8 @@ async function runExport(kind) {
     const fn = kind === 'pdf' ? exportPdf : exportPng;
     const out = await fn({ onProgress: (msg) => status.update(msg) });
     status.update(`<b>${kind.toUpperCase()} saved</b> — ${out.width} × ${out.height} px at ${state.page.dpi} dpi`, { tone: 'ok', duration: 5000 });
+    exported = true;
+    renderSteps();
   } catch (err) {
     console.error(err);
     status.update(`Export failed: ${err.message}`, { tone: 'error', duration: 8000 });
@@ -225,7 +311,7 @@ async function saveNow() {
   return result;
 }
 
-function initHeader(onHome) {
+function initHeader(onHome, onSignOut) {
   const name = $('#project-name');
   if (name) {
     name.value = state.projectName;
@@ -240,6 +326,19 @@ function initHeader(onHome) {
     save.addEventListener('click', saveNow);
     undoBtn.before(save);
     undoBtn.before(themeToggle());
+  }
+
+  // Who is signed in, and the way out.
+  const user = currentUser();
+  const exportBtn = $('#export-pdf-btn');
+  if (user && exportBtn && !$('#account-chip')) {
+    const out = el('button.btn-ghost#sign-out-btn', { type: 'button', text: 'Sign out' });
+    out.addEventListener('click', onSignOut);
+    exportBtn.after(
+      el('span.header-sep'),
+      el('span.account-chip#account-chip', { title: `${user.name} · ${user.email}`, role: 'img', 'aria-label': `Signed in as ${user.name}`, text: initials(user) }),
+      out,
+    );
   }
 
   $('#back-home')?.addEventListener('click', onHome);
@@ -263,17 +362,19 @@ function initHeader(onHome) {
 /* ------------------------------------------------------------------ */
 /* boot                                                                */
 /* ------------------------------------------------------------------ */
-export function initChrome({ onHome }) {
-  initHeader(onHome);
+export function initChrome({ onHome, onSignOut }) {
+  initHeader(onHome, onSignOut);
   renderRail();
   showPane();
   renderSteps();
   renderMapControls();
   renderFooter();
   renderHeader();
+  syncLock();
 
   subscribe(['activeTool'], () => { renderRail(); showPane(); renderSteps(); resizeSoon(); });
-  subscribe(['basemap'], renderMapControls);
+  subscribe(['studyArea', 'mapStarted'], () => { syncLock(); renderRail(); renderSteps(); });
+  subscribe(['basemap', 'panMode'], renderMapControls);
 
   // On a narrow screen the inspector is a sheet, so it has to be summoned by
   // the thing it inspects and dismissed when nothing is selected.
@@ -308,5 +409,5 @@ export function initChrome({ onHome }) {
   // not *create* a project until there is something worth keeping, or
   // browsing the template gallery would litter the home page with stubs.
   const save = debounce(() => { if (hasWork()) saveProject(); }, 900);
-  subscribe(['elements', 'page', 'layers', 'studyArea', 'templateId', 'mapLook', 'basemap', 'mapView', 'projectName', 'terrain', 'buildings3d'], save);
+  subscribe(['elements', 'page', 'layers', 'studyArea', 'templateId', 'mapLook', 'basemap', 'mapView', 'projectName', 'terrain', 'buildings3d', 'mapStarted'], save);
 }

@@ -9,6 +9,58 @@ Design system carried over from the team's Flood Watch interface
 (<https://gfw.ggis.africa>): sky/slate palette, glass surfaces, Source Sans 3
 + Fraunces.
 
+## How a map is made
+
+Nothing of the studio is shown until someone has signed in. A signed-out
+visitor gets one screen that says what the studio is, and a sign-up dialog
+that opens over it while the page behind blurs.
+
+Once in, the studio opens up in order, and says why when something is closed:
+
+1. **Study area** — pick one or several from the open boundaries, or upload a
+   boundary of your own (zipped Shapefile, GeoJSON, KML, KMZ, GPX). Until
+   there is one, every other tool carries a padlock and the right-hand panel
+   is greyed out.
+2. **Start map** — a new blank page, a template, or a contributor layout (a
+   layout traced from a sheet the Geoinfotech GIS department published). The
+   study area is kept whichever is chosen.
+3. **Data, Analysis, Elements, Layers, AI assistant** — open from here on.
+
+**My projects** is always reachable: reopening an old map is a way to begin.
+The rule itself is ten lines in `src/core/flow.js`; the rail, the header
+chain and the panels all ask it rather than each deciding for themselves.
+
+**Accounts and maps live on the account server**, `server/account-server.mjs`
+(`npm run accounts`, port 8789; `start-studio.bat` starts it with the rest).
+One SQLite file, `server/data/accounts.db`, holds the accounts and every
+account's saved maps, so signing in at the office and again at home opens the
+same library. Passwords are hashed with scrypt; the session is an httpOnly
+cookie whose token is stored only as a hash. Each browser keeps a working copy
+of the library so lists draw instantly and work continues offline; saves are
+sent up as they happen, and signing in pulls down what was saved elsewhere
+(the newest version of each map wins). Maps made in a browser before this
+existed are carried up to the account the first time that person signs in.
+
+For the office and home to share it, the account server has to be reachable
+from both — on a machine both can reach, or hosted. Serve the studio and the
+server from one domain over HTTPS and set `COOKIE_SECURE=1`.
+
+**Sign in with Google.** The dialog offers Google alongside email: Google
+shows its own account chooser, the person picks their Gmail, and the studio
+gets a signed statement of who they are — no password passes through it. The
+first use of a Gmail creates the account; later uses open it, and a Gmail that
+already has a password account here is linked to it rather than duplicated.
+
+It needs an OAuth client ID, which only whoever runs the studio can obtain.
+Copy `.env.example` to `.env`, follow the five steps in it (Google Cloud
+Console → Credentials → OAuth client ID → Web application, with
+`http://localhost:5173` as an authorised JavaScript origin), paste the ID into
+`VITE_GOOGLE_CLIENT_ID` and restart `npm run dev`. Until then the dialog shows
+a Google button that says it is not switched on, rather than one that fails.
+The ID is not a secret. The account server reads the same `.env`, and checks
+the token's signature against Google's published keys, plus its audience,
+issuer, expiry and verified email, before signing anyone in.
+
 ## Run it
 
 ```bash

@@ -10,9 +10,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$t = Get-ScheduledTask -TaskName 'CrimeDashboard-Localhost' -ErrorAction SilentlyContinue;" ^
   "if ($t) { Stop-ScheduledTask -TaskName 'CrimeDashboard-Localhost' -ErrorAction SilentlyContinue; Disable-ScheduledTask -TaskName 'CrimeDashboard-Localhost' | Out-Null; Write-Host '  Task stopped and disabled.' } else { Write-Host '  Task not found - skipping.' }"
 
-echo Stopping anything listening on ports 8086, 8085, 5173, 8788, 8787...
+echo Stopping anything listening on ports 8086, 8085, 5173, 8788, 8787, 8789...
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "foreach ($p in 8086,8085,5173,8788,8787) {" ^
+  "foreach ($p in 8086,8085,5173,8788,8787,8789) {" ^
   "  $c = Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue;" ^
   "  if (-not $c) { Write-Host ('  Port ' + $p + ': nothing running'); continue }" ^
   "  foreach ($id in ($c.OwningProcess | Sort-Object -Unique)) {" ^
