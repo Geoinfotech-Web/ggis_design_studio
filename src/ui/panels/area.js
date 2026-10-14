@@ -23,15 +23,20 @@ import {
   addStudyArea, removeStudyArea, clearStudyAreas, studyAreas, areaKey,
 } from '../../data/study-areas.js';
 import { flyToBounds } from '../../core/map.js';
-import { boundsFromBbox, formatArea } from '../../core/geo.js';
+import { boundsFromBbox, formatArea, areaKm2, bboxOf, centroidOf } from '../../core/geo.js';
+import { parseGeoFile } from '../../data/upload.js';
 import { syncAutoText } from '../../templates/apply.js';
 import { renderElements, hint } from '../artboard.js';
-import { head, section, labelled, select, textInput, button, stack, empty, miniBtn } from '../controls.js';
+import { head, section, labelled, select, textInput, button, stack, empty, miniBtn, seg } from '../controls.js';
+import { setTool } from '../tool.js';
 import { uiIcon } from '../ui-icons.js';
 
 let pane;
 let form = { level: 'state', country: 'ng', name: 'Rivers', zone: 'ss', parentState: 'Rivers', lga: '' };
 let busy = false;
+// Where the boundary comes from: the open administrative boundaries, or a
+// file of the user's own.
+let source = 'open';
 
 /**
  * The LGAs of one state, as fetched from OpenStreetMap.
@@ -204,7 +209,9 @@ async function loadBoundary({ replace = false } = {}) {
     );
     hint(n > 1
       ? 'Data and analysis now cover every area on this list. Each one is fetched separately, then merged.'
-      : 'Now open <b>Data</b> to add roads, rivers or buildings inside this area.');
+      : state.mapStarted
+        ? 'Now open <b>Data</b> to add roads, rivers or buildings inside this area.'
+        : 'Study area set. Press <b>Continue to Start map</b> when you are ready.');
   } catch (err) {
     status.update(err.message ?? 'Boundary lookup failed.', { tone: 'error', duration: 7000 });
   } finally {
@@ -380,6 +387,77 @@ function areaList() {
 }
 
 /* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------ */
+/* a boundary of your own                                              */
+/* ------------------------------------------------------------------ */
+const BOUNDARY_FILES = '.geojson,.json,.kml,.kmz,.gpx,.zip';
+
+/**
+ * Turn an uploaded file into a study area. Only its polygons are used: a
+ * study area is a region, so points and lines in the same file are ignored
+ * rather than guessed at.
+ */
+async function loadBoundaryFile(file, { replace = false } = {}) {
+  if (!file || busy) return;
+  busy = true;
+  render();
+  const status = notify.busy(`Reading <b>${file.name}</b>…`);
+  try {
+    const { geojson, name, format } = await parseGeoFile(file);
+    const polygons = (geojson.features ?? []).filter((f) =>
+      f.geometry && (f.geometry.type === 'Polygon' || f.geometry.type === 'MultiPolygon'));
+    if (!polygons.length) {
+      throw new Error(`${file.name} has no polygons. A study area needs an outline — a boundary drawn as an area, not points or lines.`);
+    }
+    const shape = { type: 'FeatureCollection', features: polygons };
+    const area = {
+      name,
+      displayName: `${name} (uploaded ${format})`,
+      level: 'custom',
+      geojson: shape,
+      bbox: bboxOf(shape),
+      areaKm2: areaKm2(shape),
+      center: centroidOf(shape),
+      countryCode: '',
+      osmType: 'upload',
+      osmId: null,
+    };
+    status.close();
+    finish(area, { replace });
+  } catch (err) {
+    status.update(err.message ?? 'That file could not be read.', { tone: 'error', duration: 8000 });
+  } finally {
+    busy = false;
+    render();
+  }
+}
+
+function uploadControls(has) {
+  const input = el('input', { type: 'file', accept: BOUNDARY_FILES, style: { display: 'none' }, 'aria-label': 'Boundary file' });
+  let replaceNext = false;
+  input.addEventListener('change', () => { loadBoundaryFile(input.files?.[0], { replace: replaceNext }); input.value = ''; });
+  const pick = (replace) => { replaceNext = replace; input.click(); };
+
+  const zone = el('button.upload-zone', { type: 'button', disabled: busy ? true : null }, [
+    el('strong', { text: busy ? 'Reading…' : has ? 'Add a boundary file' : 'Choose a boundary file' }),
+    el('span', { text: 'Zipped Shapefile, GeoJSON, KML, KMZ or GPX. It is read here in your browser and saved only with your project.' }),
+  ]);
+  zone.addEventListener('click', () => pick(false));
+  zone.addEventListener('dragover', (event) => { event.preventDefault(); zone.classList.add('is-over'); });
+  zone.addEventListener('dragleave', () => zone.classList.remove('is-over'));
+  zone.addEventListener('drop', (event) => {
+    event.preventDefault();
+    zone.classList.remove('is-over');
+    loadBoundaryFile(event.dataTransfer?.files?.[0]);
+  });
+
+  return [
+    input,
+    zone,
+    has ? button('Replace with a file instead', () => pick(true), 'ghost', { style: { width: '100%' }, disabled: busy ? true : null }) : null,
+  ];
+}
+
 export function render() {
   pane = pane ?? $('#pane-area');
   if (!pane) return;
@@ -402,8 +480,16 @@ export function render() {
   });
 
   fill(pane, [
-    head('Study area', 'The place your map is about. Everything else works inside it.'),
-    section('Find a place', stack([
+    head('Study area', state.mapStarted
+      ? 'The place your map is about. Everything else works inside it.'
+      : 'Step 1 — the place your map is about. The other tools open once it is set.'),
+    section('', [seg(
+      [{ value: 'open', label: 'Open boundaries' }, { value: 'upload', label: 'Upload my own' }],
+      source,
+      (value) => { source = value; render(); },
+    )]),
+    source === 'upload' ? section('Your own boundary', stack(uploadControls(has))) : null,
+    source === 'upload' ? null : section('Find a place', stack([
       labelled('Level', select(
         levels.map((l) => ({ value: l.id, label: l.label })),
         form.level,
@@ -443,6 +529,15 @@ export function render() {
       }) : null,
     ])),
     section(studyAreas().length > 1 ? 'Study areas' : 'Current study area', areaList()),
+    // The way on. Shown until the map has been started; after that the rail
+    // is open and this would only be noise.
+    has && !state.mapStarted ? section('', [
+      button('Continue to Start map', () => setTool('start'), 'primary', { style: { width: '100%' } }),
+      el('p', {
+        style: { margin: '7px 0 0', fontSize: '10.5px', color: 'var(--ink-faint)', lineHeight: '1.45', textAlign: 'center' },
+        text: 'You can add more areas first, or come back and change them later.',
+      }),
+    ]) : null,
   ]);
 }
 
@@ -462,7 +557,7 @@ export function loadPlace(query, country = '') {
 export function initAreaPane() {
   pane = $('#pane-area');
   render();
-  subscribe(['studyArea', 'studyAreas'], () => { if (state.activeTool === 'area') render(); });
+  subscribe(['studyArea', 'studyAreas', 'mapStarted'], () => { if (state.activeTool === 'area') render(); });
 }
 
 export { render as renderAreaPane };

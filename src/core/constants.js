@@ -455,9 +455,14 @@ export const ENDPOINTS = {
   // Every entry MUST carry the full planet. Regional instances (overpass.osm.ch
   // is Switzerland-only, for example) answer fast with a valid *empty* result
   // outside their extract, which a race would happily accept as the winner.
+  //
+  // The order here is only the starting order. The client measures every
+  // answer and from then on asks whichever mirror has been quickest and most
+  // reliable first, so a mirror that goes down stops costing anyone a wait.
   overpass: [
-    'https://overpass.kumi.systems/api/interpreter',
     'https://overpass-api.de/api/interpreter',
+    'https://overpass.openstreetmap.fr/api/interpreter',
+    'https://overpass.kumi.systems/api/interpreter',
     'https://overpass.private.coffee/api/interpreter',
   ],
 };

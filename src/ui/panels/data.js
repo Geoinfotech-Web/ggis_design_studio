@@ -296,6 +296,75 @@ async function fetchAllParts(dataset, parts, { signal, onProgress }) {
   };
 }
 
+/* ------------------------------------------------------------------ */
+/* ready before you ask                                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The layers most maps use, fetched in the background the moment a study
+ * area exists — which is two steps before anyone reaches this panel. By the
+ * time they do, adding one of these is a read from memory, not a wait on a
+ * public server.
+ *
+ * Deliberately a short list of light datasets: this is a donated service, and
+ * fetching everything on the off-chance would be taking more than is needed.
+ */
+const WARM = ['roads-major', 'rivers', 'settlements', 'health', 'education', 'waterbodies'];
+/** Background fetches at once — fewer than the client allows, so a layer the
+ *  user actually clicks never queues behind ones they have not asked for. */
+const WARM_PARALLEL = 2;
+
+/** slug → 'warming' | 'ready', for the study areas currently loaded */
+const readiness = new Map();
+let warmRun = null;
+
+const refreshIfShown = () => { if (state.activeTool === 'data') render(); };
+
+async function warmStudyArea() {
+  warmRun?.abort();
+  readiness.clear();
+  const area = state.studyArea;
+  if (!area) { refreshIfShown(); return; }
+
+  const run = new AbortController();
+  warmRun = run;
+  const parts = areaParts(area);
+
+  const queue = WARM.map(datasetBySlug)
+    .filter(Boolean)
+    // Never ask in the background for something the size check would refuse
+    // in the foreground.
+    .filter((dataset) => parts.every((part) => checkSize(dataset, part.bbox).ok));
+
+  const worker = async () => {
+    for (;;) {
+      const dataset = queue.shift();
+      if (!dataset || run.signal.aborted) return;
+      readiness.set(dataset.slug, 'warming');
+      refreshIfShown();
+      try {
+        for (const part of parts) {
+          await fetchForPart(dataset, part, { signal: run.signal, onProgress: () => {} });
+        }
+        if (!run.signal.aborted) readiness.set(dataset.slug, 'ready');
+      } catch {
+        // A background fetch that fails is simply not ready; clicking the row
+        // tries again in the foreground and reports properly.
+        if (!run.signal.aborted) readiness.delete(dataset.slug);
+      }
+      if (!run.signal.aborted) refreshIfShown();
+    }
+  };
+  await Promise.all(Array.from({ length: WARM_PARALLEL }, worker));
+}
+
+/** Area edits come in bursts (add, add, remove); wait for them to settle. */
+let warmTimer;
+function scheduleWarm() {
+  clearTimeout(warmTimer);
+  warmTimer = setTimeout(() => { warmStudyArea().catch(() => {}); }, 900);
+}
+
 async function addDataset(dataset, { quiet = false } = {}) {
   const area = state.studyArea;
   if (!area) {
@@ -643,11 +712,14 @@ function datasetRow(dataset) {
   }
   if (added) actions.push(miniBtn(uiIcon('trash'), 'Remove this layer', () => toggleDataset(dataset), { danger: true }));
 
+  const ready = readiness.get(dataset.slug);
   const sub = loading
     ? 'Fetching…'
     : pick
       ? `${pick.size} of ${segs} types shown`
-      : dataset.hint;
+      : !added && ready === 'warming'
+        ? 'Getting this ready in the background…'
+        : dataset.hint;
 
   const node = row({
     icon: loading ? el('span.spinner.spinner--ink') : dataset.icon,
@@ -657,6 +729,14 @@ function datasetRow(dataset) {
     onClick: () => toggleDataset(dataset),
     actions,
   });
+
+  // Already downloaded for this study area: adding it will not wait on anyone.
+  if (!added && !loading && ready === 'ready') {
+    node.querySelector('.row-title')?.append(el('span.ready-tag', {
+      text: 'Ready',
+      title: 'Already downloaded for this study area — it will be added straight away.',
+    }));
+  }
 
   // Rows that pull from both say so. It is a note, not a choice — there is
   // nothing to pick, and the merge happens either way.
@@ -719,6 +799,9 @@ export function initDataPane() {
   pane = $('#pane-data');
   render();
   subscribe(['layers', 'studyArea', 'studyAreas'], () => { if (state.activeTool === 'data') render(); });
+  // Start fetching the common layers as soon as the map has a place.
+  subscribe(['studyAreas'], scheduleWarm);
+  if (state.studyArea) scheduleWarm();
 }
 
 export { render as renderDataPane };

@@ -9,6 +9,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "cache": "node server/cache-server.mjs",
+    "accounts": "node server/account-server.mjs",
     "prefetch": "node server/prefetch.mjs",
     "import": "node --max-old-space-size=8192 server/import-pbf.mjs",
     "ai": "node server/ai-backend.mjs"
