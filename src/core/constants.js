@@ -32,22 +32,60 @@ export const APP = {
 const ESRI = (path) => [`https://server.arcgisonline.com/ArcGIS/rest/services/${path}/MapServer/tile/{z}/{y}/{x}`];
 const ESRI_CREDIT = 'Imagery © Esri, Maxar, Earthstar Geographics and the GIS User Community';
 
+/*
+ * `thumb` is only for the basemap picker on the map: a vector style has no
+ * single tile to show, so it borrows a raster tile that looks like it.
+ */
 export const BASEMAPS = {
   /* ---- vector: the ones with switchable layers -------------------- */
   liberty: {
     label: 'Liberty', group: 'Vector', type: 'vector', hint: 'Full detail, colourful',
     url: 'https://tiles.openfreemap.org/styles/liberty',
     attribution: 'Basemap © OpenFreeMap / OpenMapTiles / OpenStreetMap contributors',
+    thumb: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
   },
   bright: {
     label: 'Bright', group: 'Vector', type: 'vector', hint: 'Clean and legible',
     url: 'https://tiles.openfreemap.org/styles/bright',
     attribution: 'Basemap © OpenFreeMap / OpenMapTiles / OpenStreetMap contributors',
+    thumb: ['https://a.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png'],
   },
   positron: {
     label: 'Minimal', group: 'Vector', type: 'vector', hint: 'Pale — best under data',
     url: 'https://tiles.openfreemap.org/styles/positron',
     attribution: 'Basemap © OpenFreeMap / OpenMapTiles / OpenStreetMap contributors',
+    thumb: ESRI('Canvas/World_Light_Gray_Base'),
+  },
+  'ofm-dark': {
+    label: 'Dark', group: 'Vector', type: 'vector', hint: 'Night mode, every layer switchable',
+    url: 'https://tiles.openfreemap.org/styles/dark',
+    attribution: 'Basemap © OpenFreeMap / OpenMapTiles / OpenStreetMap contributors',
+    thumb: ESRI('Canvas/World_Dark_Gray_Base'),
+    dark: true,
+  },
+  fiord: {
+    label: 'Fiord', group: 'Vector', type: 'vector', hint: 'Muted blue-grey — calm under bright data',
+    url: 'https://tiles.openfreemap.org/styles/fiord',
+    attribution: 'Basemap © OpenFreeMap / OpenMapTiles / OpenStreetMap contributors',
+    thumb: ESRI('Canvas/World_Dark_Gray_Base'),
+    dark: true,
+  },
+
+  /* ---- street maps ------------------------------------------------- */
+  osm: {
+    label: 'OpenStreetMap', group: 'Street maps', type: 'raster', hint: 'The standard OSM map',
+    rasters: [{ tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'], maxzoom: 19 }],
+    attribution: 'Basemap © OpenStreetMap contributors (ODbL)',
+  },
+  'osm-hot': {
+    label: 'Humanitarian', group: 'Street maps', type: 'raster', hint: 'HOT style — health, water and shelter stand out',
+    rasters: [{ tiles: ['a', 'b', 'c'].map((s) => `https://${s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png`), maxzoom: 19 }],
+    attribution: 'Basemap © Humanitarian OpenStreetMap Team, OpenStreetMap France, data © OpenStreetMap contributors',
+  },
+  natgeo: {
+    label: 'National Geographic', group: 'Street maps', type: 'raster', hint: 'Atlas style with shaded relief',
+    rasters: [{ tiles: ESRI('NatGeo_World_Map'), maxzoom: 16 }],
+    attribution: 'Basemap © Esri, National Geographic, Garmin, HERE, UNEP-WCMC, USGS, NASA, ESA, METI, NRCAN, GEBCO, NOAA',
   },
 
   /* ---- imagery ----------------------------------------------------- */
@@ -90,6 +128,16 @@ export const BASEMAPS = {
     label: 'Shaded relief', group: 'Terrain', type: 'raster', hint: 'Landform only — good under data',
     rasters: [{ tiles: ESRI('World_Shaded_Relief'), maxzoom: 13 }],
     attribution: 'Relief © Esri',
+  },
+  'esri-terrain': {
+    label: 'Terrain', group: 'Terrain', type: 'raster', hint: 'Relief with land and water tints, no labels',
+    rasters: [{ tiles: ESRI('World_Terrain_Base'), maxzoom: 13 }],
+    attribution: 'Basemap © Esri, USGS, NOAA',
+  },
+  physical: {
+    label: 'Physical', group: 'Terrain', type: 'raster', hint: 'Natural Earth colours — for regional and national maps',
+    rasters: [{ tiles: ESRI('World_Physical_Map'), maxzoom: 8 }],
+    attribution: 'Basemap © Esri, U.S. National Park Service',
   },
 
   /* ---- quiet canvases, for maps that are about the data ------------ */

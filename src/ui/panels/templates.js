@@ -8,7 +8,7 @@ import { state, set, subscribe } from '../../core/store.js';
 import { notify } from '../../core/toast.js';
 import { TEMPLATE_CATEGORIES, templatesInCategory, templateById } from '../../templates/catalog.js';
 import { applyTemplate } from '../../templates/apply.js';
-import { templatePreview } from '../preview.js';
+import { templateCard } from '../template-info.js';
 import { head, section, pillRow, seg, checkRow, button, stack, labelled, select } from '../controls.js';
 import {
   PAPER_SIZES, MAP_LOOKS, MAP_TEXTURES, paperDimsLabel,
@@ -23,23 +23,17 @@ let filterCategory = 'all';
 let pane;
 
 function card(tpl) {
-  const node = el('button.tpl-card', { type: 'button', title: `${tpl.name} — ${tpl.blurb}` }, [
-    el('div.tpl-thumb', {}, [templatePreview(tpl)]),
-    el('div.tpl-meta', {}, [
-      el('strong', { text: tpl.name }),
-      el('span', { text: tpl.tags.join(' · ') }),
-    ]),
-  ]);
-  node.classList.toggle('is-active', tpl.id === state.templateId);
-  node.addEventListener('click', () => {
-    applyTemplate(tpl.id);
-    layoutArtboard();
-    renderElements();
-    resizeSoon();
-    notify.ok(`<b>${tpl.name}</b> applied. Every element is still yours to move and edit.`);
-    hint('Drag any card, title or arrow to reposition it. Hold <b>Alt</b> to ignore the snap guides.');
+  return templateCard(tpl, {
+    active: tpl.id === state.templateId,
+    onUse: () => {
+      applyTemplate(tpl.id);
+      layoutArtboard();
+      renderElements();
+      resizeSoon();
+      notify.ok(`<b>${tpl.name}</b> applied. Every element is still yours to move and edit.`);
+      hint('Drag any card, title or arrow to reposition it. Hold <b>Alt</b> to ignore the snap guides.');
+    },
   });
-  return node;
 }
 
 export function renderTemplatesPane() {

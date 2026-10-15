@@ -115,8 +115,15 @@
 .land-step { display: flex; align-items: center; gap: 12px; font-size: 15px; font-weight: 700; }
 .land-step b { font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 13px; font-weight: 600; color: var(--accent-deep); }
 
+/* A short but wide window (a laptop with toolbars, or zoomed in) keeps the
+   copy and the sheet side by side; it just scrolls and shrinks the sheet. */
+@media (max-height: 600px) and (min-width: 861px) {
+  .landing { overflow-y: auto; }
+  .land-main { flex: none; padding-top: 24px; padding-bottom: 24px; }
+  .land-sheet img { max-height: 70vh; }
+}
 /* A phone has no room for "one screen": stack it and let it scroll. */
-@media (max-width: 860px), (max-height: 600px) {
+@media (max-width: 860px) {
   .landing { overflow-y: auto; }
   .land-main { flex: none; flex-direction: column; align-items: stretch; padding-top: 24px; padding-bottom: 32px; }
   .land-copy { flex: none; }
