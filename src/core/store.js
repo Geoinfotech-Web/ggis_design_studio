@@ -10,6 +10,7 @@
 // The catalogue is a static data module with no imports of its own, so this
 // stays a leaf dependency rather than a cycle back into the UI.
 import { templateById } from '../templates/catalog.js';
+import { deleteProjectLayers } from './session.js';
 
 const HISTORY_KEYS = ['elements', 'page', 'templateId', 'mapLook'];
 const HISTORY_LIMIT = 60;
@@ -443,6 +444,7 @@ export function saveProjectAs(name, thumbnail) {
 export function deleteProject(id) {
   const result = writeLibrary(readLibrary().filter((p) => p.id !== id));
   outbox.delete(id);
+  deleteProjectLayers(id);
   fetch(`${PROJECTS_API}/${encodeURIComponent(id)}`, { method: 'DELETE', credentials: 'same-origin' }).catch(() => {
     // It will reappear from the server on the next sign-in; say so rather than pretend.
     syncFailed = true;
@@ -452,12 +454,22 @@ export function deleteProject(id) {
 }
 
 export function renameProject(id, name) {
+  const clean = String(name ?? '').trim();
+  if (!clean) return { ok: false, error: 'A project needs a name.' };
   const list = readLibrary();
   const entry = list.find((p) => p.id === id);
-  if (!entry) return { ok: false };
-  entry.name = name;
-  if (entry.doc) entry.doc.projectName = name;
-  return writeLibrary(list);
+  if (!entry) return { ok: false, error: 'That project is no longer in this browser.' };
+  entry.name = clean;
+  entry.savedAt = Date.now();
+  if (entry.doc) entry.doc.projectName = clean;
+  const result = writeLibrary(list);
+  if (!result.ok) return result;
+  // The open map carries its name in the live document too; without this the
+  // next autosave would write the old name straight back.
+  if (state.projectId === id) set({ projectName: clean }, { history: false });
+  // And the account's copy, so the new name shows on every computer.
+  pushProject(entry);
+  return { ok: true };
 }
 
 /** Serialise the whole project for "download .gdsmap" / re-import. */

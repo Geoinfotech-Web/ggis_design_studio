@@ -10,8 +10,10 @@
 import { $, el } from '../core/dom.js';
 import { state, set, touch, checkpoint, subscribe } from '../core/store.js';
 import { PAPER_SIZES, paperDimsLabel } from '../core/constants.js';
-import { renderElementDom, elementLabel } from '../layout/elements.js';
+import { renderElementDom, elementLabel, zoomInsetView, createElement } from '../layout/elements.js';
 import { currentMetresPerPixel } from '../layout/derive.js';
+import { notify } from '../core/toast.js';
+import { getMap } from '../core/map.js';
 
 let artboard, layer, label, wrap;
 const nodes = new Map();          // element id → .el node
@@ -38,11 +40,15 @@ export function paperDims(page = state.page) {
 /** The artboard rectangle in canvas-wrap pixels. */
 export function artboardRect() {
   if (!artboard) return { x: 0, y: 0, w: 0, h: 0 };
+  // From the style, not offsetLeft/offsetWidth: those are whole pixels, and
+  // the layout view keeps the map aligned to this rectangle step by step —
+  // rounding on every step would let the two drift apart.
+  const px = (v, fallback) => (v ? parseFloat(v) : fallback);
   return {
-    x: artboard.offsetLeft,
-    y: artboard.offsetTop,
-    w: artboard.offsetWidth,
-    h: artboard.offsetHeight,
+    x: px(artboard.style.left, artboard.offsetLeft),
+    y: px(artboard.style.top, artboard.offsetTop),
+    w: px(artboard.style.width, artboard.offsetWidth),
+    h: px(artboard.style.height, artboard.offsetHeight),
   };
 }
 
@@ -80,15 +86,195 @@ export function layoutArtboard() {
   let h = w / aspect;
   if (h > availH) { h = Math.max(140, availH); w = h * aspect; }
 
-  artboard.style.width = `${Math.round(w)}px`;
-  artboard.style.height = `${Math.round(h)}px`;
-  artboard.style.left = `${Math.round((wrap.clientWidth - w) / 2)}px`;
-  artboard.style.top = `${Math.round((wrap.clientHeight - h) / 2)}px`;
+  // The layout view scales and shifts the fitted page.
+  w *= layoutView.zoom;
+  h *= layoutView.zoom;
+  artboard.style.width = `${w.toFixed(2)}px`;
+  artboard.style.height = `${h.toFixed(2)}px`;
+  artboard.style.left = `${((wrap.clientWidth - w) / 2 + layoutView.dx).toFixed(2)}px`;
+  artboard.style.top = `${((wrap.clientHeight - h) / 2 + layoutView.dy).toFixed(2)}px`;
 
   if (label) {
     const paper = PAPER_SIZES[state.page.size] ?? PAPER_SIZES.a4;
-    label.textContent = `${paperLabel} ${orientation} · ${paperDimsLabel(paper, orientation === 'portrait')} · ${state.page.dpi} dpi`;
+    const zoomNote = layoutView.zoom !== 1 ? ` · ${Math.round(layoutView.zoom * 100)}%` : '';
+    label.textContent = `${paperLabel} ${orientation} · ${paperDimsLabel(paper, orientation === 'portrait')} · ${state.page.dpi} dpi${zoomNote}`;
   }
+}
+
+/**
+ * Grid lines follow the map while it moves, not just after it settles.
+ * Only grid elements are redrawn, once per frame — the rest of the page
+ * still waits for the camera to stop.
+ */
+function initLiveGrid() {
+  const map = getMap();
+  if (!map) return;
+  let frame = 0;
+  const redraw = () => {
+    frame = 0;
+    const grids = state.elements.filter((e) => e.type === 'grid' && !e.hidden);
+    if (!grids.length) return;
+    const ctx = { u: unit(), mPerPx: currentMetresPerPixel(), artW: artboard.offsetWidth };
+    for (const elm of grids) {
+      const inner = nodes.get(elm.id)?.querySelector('.el-inner');
+      if (inner) renderElementDom(inner, elm, ctx);
+    }
+  };
+  map.on('move', () => { if (!frame) frame = requestAnimationFrame(redraw); });
+  // A settled camera always gets a final, exact pass even if no frame ran.
+  map.on('moveend', () => { cancelAnimationFrame(frame); redraw(); });
+}
+
+/** Add a grid over the map frame, or remove it if there is one. */
+export function toggleGrid() {
+  const existing = state.elements.find((e) => e.type === 'grid');
+  if (existing) {
+    removeElement(existing.id);
+    renderElements();
+    return false;
+  }
+  // Over the map frame when the page has one; otherwise inset from the page
+  // edge, leaving the margin its labels sit in outside the frame. It goes to
+  // the bottom of the stack, so title bands and panels sit on top.
+  const frame = state.elements.find((e) => e.type === 'neatline');
+  const box = frame ? { x: frame.x, y: frame.y, w: frame.w, h: frame.h } : { x: 4, y: 4, w: 92, h: 92 };
+  checkpoint();
+  const elm = createElement('grid', box);
+  set({ elements: [elm, ...state.elements], selectedElementId: elm.id, selectedLayerId: null }, { history: false });
+  renderElements();
+  return true;
+}
+
+/* ------------------------------------------------------------------ */
+/* layout view: zoom and move the whole page, map and all              */
+/* ------------------------------------------------------------------ */
+/*
+ * Like a layout view in a desktop GIS. The page is drawn bigger or smaller
+ * and the map under it is zoomed by exactly the same factor about the same
+ * point, so what the page shows of the map never changes — only how large
+ * it is on screen. That is what lets small text, a legend or an inset be
+ * looked at closely and edited, without disturbing the map's framing.
+ *
+ * Locking the layout hands the mouse to this view: the wheel zooms the page
+ * and dragging empty space moves it, while the map's own pan and zoom are
+ * switched off so nothing can slide the map out from under the page.
+ */
+const layoutView = { zoom: 1, dx: 0, dy: 0 };
+let layoutLocked = false;
+const LAYOUT_MIN = 0.25;
+const LAYOUT_MAX = 8;
+
+export const isLayoutLocked = () => layoutLocked;
+export const layoutZoom = () => layoutView.zoom;
+
+const mapRef = () => getMap();
+
+/**
+ * Move to a new layout view, carrying the map along. `anchor` is the point
+ * (canvas-wrap pixels) that stays still while zooming; default is the page
+ * centre.
+ */
+export function setLayoutView({ zoom = layoutView.zoom, dx, dy } = {}, anchor = null) {
+  if (!artboard || !wrap) return;
+  const before = artboardRect();
+  const z = Math.min(LAYOUT_MAX, Math.max(LAYOUT_MIN, zoom));
+  const s = z / layoutView.zoom;
+
+  if (dx === undefined && dy === undefined) {
+    // Zoom about the anchor: the page point under it stays under it.
+    const a = anchor ?? { x: before.x + before.w / 2, y: before.y + before.h / 2 };
+    const nw = before.w * s;
+    const nh = before.h * s;
+    const nx = a.x - (a.x - before.x) * s;
+    const ny = a.y - (a.y - before.y) * s;
+    layoutView.dx = nx + nw / 2 - wrap.clientWidth / 2;
+    layoutView.dy = ny + nh / 2 - wrap.clientHeight / 2;
+  } else {
+    layoutView.dx = dx ?? layoutView.dx;
+    layoutView.dy = dy ?? layoutView.dy;
+  }
+  layoutView.zoom = z;
+  layoutArtboard();
+  const after = artboardRect();
+
+  // The map follows: the place that was at the page's centre goes to the
+  // new page centre, zoomed by the same factor.
+  const map = mapRef();
+  if (map && before.w > 0) {
+    const geo = map.unproject([before.x + before.w / 2, before.y + before.h / 2]);
+    const cx = wrap.clientWidth / 2;
+    const cy = wrap.clientHeight / 2;
+    map.jumpTo({ center: geo, zoom: map.getZoom() + Math.log2(after.w / before.w) });
+    map.panBy([cx - (after.x + after.w / 2), cy - (after.y + after.h / 2)], { animate: false });
+  }
+  renderElements();
+  touch('layoutView');
+}
+
+export const zoomLayout = (factor, anchor) => setLayoutView({ zoom: layoutView.zoom * factor }, anchor);
+export const panLayout = (ddx, ddy) => setLayoutView({ dx: layoutView.dx + ddx, dy: layoutView.dy + ddy });
+export const fitLayout = () => {
+  if (layoutView.zoom === 1 && !layoutView.dx && !layoutView.dy) return;
+  setLayoutView({ zoom: 1 });
+  setLayoutView({ dx: 0, dy: 0 });
+};
+
+/** The current view, so an export can fit the page and put it back after. */
+export const layoutViewSnapshot = () => ({ ...layoutView });
+export function restoreLayoutView(snap) {
+  if (!snap) return;
+  setLayoutView({ zoom: snap.zoom });
+  setLayoutView({ dx: snap.dx, dy: snap.dy });
+}
+
+export function setLayoutLocked(on) {
+  layoutLocked = Boolean(on);
+  const map = mapRef();
+  if (map) {
+    for (const handler of ['scrollZoom', 'dragPan', 'dragRotate', 'doubleClickZoom', 'touchZoomRotate', 'boxZoom']) {
+      map[handler]?.[layoutLocked ? 'disable' : 'enable']();
+    }
+  }
+  $('#studio')?.classList.toggle('is-layout-locked', layoutLocked);
+  if (layoutLocked) hint('<b>Layout locked</b> — scroll to zoom the page, drag empty space to move it. Elements stay editable. Press <b>L</b> to unlock.', 5600);
+  touch('layoutView');
+}
+
+function initLayoutView() {
+  // Wheel over the canvas zooms the page while locked. Capture phase, so it
+  // is decided before MapLibre or an inset sees the event.
+  wrap.addEventListener('wheel', (event) => {
+    if (!layoutLocked) return;
+    if (event.target.closest?.('.map-controls, .layout-bar, .maplibregl-ctrl')) return;
+    // An inset being panned keeps its own wheel.
+    if (insetEditId && event.target.closest?.('.el.is-inset-editing')) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const r = wrap.getBoundingClientRect();
+    const factor = Math.exp(-Math.max(-60, Math.min(60, event.deltaY)) * 0.0045);
+    zoomLayout(factor, { x: event.clientX - r.left, y: event.clientY - r.top });
+  }, { passive: false, capture: true });
+
+  // Dragging empty space (map or scrim, not an element or a control) moves
+  // the page while locked.
+  wrap.addEventListener('pointerdown', (event) => {
+    if (!layoutLocked || event.button !== 0) return;
+    if (event.target.closest?.('.el, .map-controls, .layout-bar, .maplibregl-ctrl')) return;
+    let lastX = event.clientX;
+    let lastY = event.clientY;
+    wrap.classList.add('is-layout-dragging');
+    const move = (e) => {
+      panLayout(e.clientX - lastX, e.clientY - lastY);
+      lastX = e.clientX;
+      lastY = e.clientY;
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      wrap.classList.remove('is-layout-dragging');
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up, { once: true });
+  });
 }
 
 /* ------------------------------------------------------------------ */
@@ -102,7 +288,9 @@ export function layoutArtboard() {
  * element: grab the line to move or select it, and everything inside the
  * line belongs to the map.
  */
-const FRAME_TYPES = new Set(['neatline']);
+// The grid too: it usually covers the whole map frame, and the map under it
+// must still pan and zoom.
+const FRAME_TYPES = new Set(['neatline', 'grid']);
 const EDGES = ['top', 'right', 'bottom', 'left'];
 
 function buildNode(elm) {
@@ -114,7 +302,82 @@ function buildNode(elm) {
     ...HANDLES.map((h) => el('div.el-handle', { dataset: { h } })),
   ]);
   node.addEventListener('pointerdown', (e) => onPointerDown(e, elm.id));
+  if (elm.type === 'inset') {
+    node.addEventListener('dblclick', (e) => {
+      if (e.target.closest('.el-handle')) return;
+      setInsetEditing(insetEditId === elm.id ? null : elm.id);
+    });
+    node.addEventListener('wheel', (e) => onInsetWheel(e, elm.id), { passive: false });
+  }
   return node;
+}
+
+/* ------------------------------------------------------------------ */
+/* inset view editing: pan and zoom the map inside a locator inset      */
+/* ------------------------------------------------------------------ */
+let insetEditId = null;
+let insetPan = null;
+
+export const insetEditingId = () => insetEditId;
+
+/**
+ * Put an inset into view-editing mode (drag pans its map, the wheel zooms
+ * it) or take it out with null. Selecting anything else ends it.
+ */
+export function setInsetEditing(id) {
+  insetEditId = id;
+  if (id && state.selectedElementId !== id) selectElement(id);
+  for (const [nid, node] of nodes) node.classList.toggle('is-inset-editing', nid === id);
+  if (id) hint('<b>Editing the inset view</b> — drag to pan, scroll to zoom. Double-click or press <b>Esc</b> when done.', 5200);
+  touch('insetEditing');
+}
+
+function insetContentRect(id) {
+  const view = nodes.get(id)?.querySelector('.inset-view');
+  const r = view?.getBoundingClientRect();
+  return r && r.width > 2 && r.height > 2 ? r : null;
+}
+
+function onInsetWheel(event, id) {
+  if (insetEditId !== id) return;
+  const elm = state.elements.find((e) => e.id === id);
+  const r = insetContentRect(id);
+  if (!elm || !r) return;
+  event.preventDefault();
+  const about = [(event.clientX - r.left) / r.width - 0.5, (event.clientY - r.top) / r.height - 0.5];
+  const steps = event.deltaY < 0 ? 0.25 : -0.25;
+  updateElement(id, { style: zoomInsetView(elm.style, steps, about) }, { history: false });
+}
+
+function startInsetPan(event, elm, node) {
+  const r = insetContentRect(elm.id);
+  if (!r) return false;
+  insetPan = {
+    id: elm.id, startX: event.clientX, startY: event.clientY,
+    origin: [...(elm.style.viewPan ?? [0, 0])], w: r.width, h: r.height, moved: false, frame: 0,
+  };
+  node.setPointerCapture(event.pointerId);
+  node.classList.add('is-inset-dragging');
+  const move = (e) => {
+    const p = insetPan;
+    if (!p) return;
+    p.pan = [p.origin[0] + (e.clientX - p.startX) / p.w, p.origin[1] + (e.clientY - p.startY) / p.h];
+    if (!p.moved) { p.moved = true; checkpoint(); }
+    // One repaint per frame however fast the pointer reports.
+    cancelAnimationFrame(p.frame);
+    p.frame = requestAnimationFrame(() => apply(p));
+  };
+  const apply = (p) => updateElement(p.id, { style: { viewPan: p.pan.map((v) => Number(v.toFixed(4))) } }, { history: false });
+  const up = () => {
+    window.removeEventListener('pointermove', move);
+    node.classList.remove('is-inset-dragging');
+    // The last position always lands, even if its frame never came.
+    if (insetPan?.moved) { cancelAnimationFrame(insetPan.frame); apply(insetPan); }
+    insetPan = null;
+  };
+  window.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', up, { once: true });
+  return true;
 }
 
 function positionNode(node, elm) {
@@ -141,6 +404,7 @@ export function renderElements() {
     }
     node.style.zIndex = String(index + 1);
     node.classList.toggle('is-selected', elm.id === state.selectedElementId);
+    node.classList.toggle('is-inset-editing', elm.id === insetEditId);
     node.classList.toggle('is-locked', Boolean(elm.locked));
     node.style.display = elm.hidden ? 'none' : '';
     node.querySelector('.el-tag').textContent = elementLabel(elm);
@@ -246,6 +510,9 @@ function onPointerDown(event, id) {
   const handle = event.target.closest('.el-handle')?.dataset.h ?? null;
   const rect = artboardRect();
   const node = nodes.get(id);
+
+  // An inset in view-editing mode pans its own map instead of moving.
+  if (!handle && insetEditId === id && startInsetPan(event, elm, node)) return;
 
   dragging = {
     id, handle, node,
@@ -384,6 +651,14 @@ export function initArtboard() {
 
   window.addEventListener('resize', () => { layoutArtboard(); renderElements(); });
 
+  // Selecting anything else — or nothing, which is what Esc does — ends
+  // inset view editing, so the next drag moves elements again.
+  subscribe(['selectedElementId', 'elements'], () => {
+    if (insetEditId && (state.selectedElementId !== insetEditId || !state.elements.some((e) => e.id === insetEditId))) {
+      setInsetEditing(null);
+    }
+  });
+
   window.addEventListener('keydown', (event) => {
     if (state.view !== 'studio') return;
     const target = event.target;
@@ -405,6 +680,8 @@ export function initArtboard() {
   });
 
   initPanMode();
+  initLayoutView();
+  initLiveGrid();
   layoutArtboard();
   renderElements();
 }
@@ -457,14 +734,12 @@ function initPanMode() {
   });
 }
 
-/** Show a transient hint over the canvas. */
+/**
+ * Show a transient tip. It goes to the toast stack rather than a bubble on
+ * the map, so it never sits over the scale bar or the page.
+ */
 export function hint(message, ms = 4200) {
-  const node = $('#canvas-hint');
-  if (!node) return;
-  node.innerHTML = message;
-  node.classList.add('is-shown');
-  clearTimeout(hint._t);
-  hint._t = setTimeout(() => node.classList.remove('is-shown'), ms);
+  notify.info(message, { duration: ms });
 }
 
 export const artboardNode = () => artboard;

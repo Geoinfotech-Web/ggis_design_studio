@@ -111,8 +111,15 @@ export function seg(options, value, onChange) {
  * toggle, and an empty value is shown as a hollow chequered swatch sitting on
  * top of it, the way every GIS draws "no brush".
  *
+ * `onChange` runs on every move of the picker, with `{ live: true }`, so the
+ * map and page follow the colour as it is dragged — and once more with
+ * `{ live: false }` when the picker closes on a final choice. A caller that
+ * rebuilds its panel must only do so on the final call: rebuilding removes
+ * this input from the page, and the browser closes a picker whose input is
+ * gone, which is how dragging across the palette used to make it vanish.
+ *
  * @param {string} value  a hex colour, or TRANSPARENT
- * @param {(value:string)=>void} onChange
+ * @param {(value:string, info:{live:boolean})=>void} onChange
  * @param {{transparent?:boolean, title?:string}} [opts]
  */
 export function colorInput(value, onChange, opts = {}) {
@@ -124,7 +131,8 @@ export function colorInput(value, onChange, opts = {}) {
     value: empty ? (opts.lastColor ?? '#94a3b8') : (value ?? '#000000'),
     title: opts.title ?? 'Pick a colour',
   });
-  node.addEventListener('input', () => onChange(node.value));
+  node.addEventListener('input', () => onChange(node.value, { live: true }));
+  node.addEventListener('change', () => onChange(node.value, { live: false }));
   if (!opts.transparent) return node;
 
   const wrap = el('span', { style: { position: 'relative', display: 'inline-flex', flex: 'none' } }, [node]);
@@ -156,7 +164,7 @@ export function colorInput(value, onChange, opts = {}) {
       color: 'var(--ink-soft)',
     },
   });
-  toggle.addEventListener('click', () => onChange(empty ? node.value : TRANSPARENT));
+  toggle.addEventListener('click', () => onChange(empty ? node.value : TRANSPARENT, { live: false }));
 
   return el('span', { style: { display: 'inline-flex', gap: '3px', alignItems: 'center', flex: 'none' } }, [wrap, toggle]);
 }

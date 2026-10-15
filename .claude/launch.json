@@ -20,6 +20,12 @@
       "port": 8788
     },
     {
+      "name": "accounts",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["server/account-server.mjs"],
+      "port": 8789
+    },
+    {
       "name": "studio-attached",
       "url": "http://localhost:5173",
       "port": 5173

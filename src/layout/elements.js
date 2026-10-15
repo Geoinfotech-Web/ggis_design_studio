@@ -13,7 +13,7 @@
  * different places and drifted apart.
  */
 
-import { FONTS } from '../core/constants.js';
+import { FONTS, BASEMAPS } from '../core/constants.js';
 import { uid, esc } from '../core/dom.js';
 import { state } from '../core/store.js';
 import { bboxOf } from '../core/geo.js';
@@ -22,7 +22,7 @@ import { contextFor } from '../data/inset-context.js';
 import {
   rgba, roundRect, paintChrome, setFont, drawParagraph, drawLine, drawSwatch,
 } from './paint.js';
-import { legendRows, statsRows, metadataRows, creditsText, scaleBarFor } from './derive.js';
+import { legendRows, statsRows, metadataRows, creditsText, scaleBarFor, editRows } from './derive.js';
 import { iconSvg } from '../layers/icons.js';
 import { dashArray, isTransparent, swatchStroke } from '../layers/symbology.js';
 
@@ -45,7 +45,7 @@ const TEXT = { font: 'sans', size: 13, weight: 400, italic: false, color: '#0f17
 /* ------------------------------------------------------------------ */
 
 /** Content box after border + padding, in the same units as `box`. */
-function contentBox(box, style, u) {
+export function contentBox(box, style, u) {
   const inset = u(style.padding ?? 0) + u(style.borderWidth ?? 0);
   return { x: box.x + inset, y: box.y + inset, w: box.w - inset * 2, h: box.h - inset * 2 };
 }
@@ -367,16 +367,352 @@ function paintShape(c, s, box, u) {
  * each to its own bounds would centre both in the box and draw the study area
  * filling a country it is a fiftieth the size of.
  */
-function ringProjector(reference, box) {
+/*
+ * Web Mercator, on the unit square: x and y run 0 → 1 across the whole
+ * world. The inset draws basemap tiles under its outlines, and tiles are in
+ * this projection, so the outlines have to be too or they slide off the
+ * coastline they are drawn over.
+ */
+const mercX = (lng) => (lng + 180) / 360;
+const mercY = (lat) => {
+  const r = Math.max(-85.0511, Math.min(85.0511, lat)) * Math.PI / 180;
+  return (1 - Math.asinh(Math.tan(r)) / Math.PI) / 2;
+};
+
+/**
+ * @param {object} reference  GeoJSON the view is fitted to
+ * @param {{x,y,w,h}} box
+ * @param {{zoom?: number, pan?: number[]}} [view]  the inset's own view:
+ *        zoom in powers of two over the fitted view, and pan as a fraction of
+ *        the box, so the same view gives the same picture on screen and on a
+ *        300 dpi print.
+ * @returns the projector, carrying `k` (pixels per world) and its origin
+ */
+function ringProjector(reference, box, view = {}) {
   const b = bboxOf(reference);
   if (!b) return null;
   const [w, s, e, n] = b;
-  const spanX = Math.max(e - w, 1e-9);
-  const spanY = Math.max(n - s, 1e-9);
-  const k = Math.min(box.w / spanX, box.h / spanY);
-  const ox = box.x + (box.w - spanX * k) / 2;
-  const oy = box.y + (box.h - spanY * k) / 2;
-  return ([lng, lat]) => [ox + (lng - w) * k, oy + (n - lat) * k];
+  const x0 = mercX(w); const x1 = mercX(e);
+  const y0 = mercY(n); const y1 = mercY(s);
+  const spanX = Math.max(x1 - x0, 1e-12);
+  const spanY = Math.max(y1 - y0, 1e-12);
+  const k = Math.min(box.w / spanX, box.h / spanY) * 2 ** (Number(view.zoom) || 0);
+  const pan = view.pan ?? [0, 0];
+  const ox = box.x + box.w / 2 + (pan[0] || 0) * box.w - ((x0 + x1) / 2) * k;
+  const oy = box.y + box.h / 2 + (pan[1] || 0) * box.h - ((y0 + y1) / 2) * k;
+  const project = ([lng, lat]) => [ox + mercX(lng) * k, oy + mercY(lat) * k];
+  return Object.assign(project, { k, ox, oy });
+}
+
+/** Tile templates for an inset basemap: its rasters, or a vector style's stand-in. */
+function insetTileSources(key) {
+  if (!key || key === 'none') return null;
+  const spec = BASEMAPS[key];
+  if (!spec) return null;
+  if (spec.rasters) return spec.rasters.map((r) => ({ tiles: r.tiles, maxzoom: r.maxzoom ?? 19 }));
+  return spec.thumb ? [{ tiles: spec.thumb, maxzoom: 19 }] : null;
+}
+
+/**
+ * The basemap tiles covering `clip`, placed in the same pixel space as the
+ * outlines. The tile zoom follows the drawing's real resolution, so a print
+ * at 300 dpi fetches sharper tiles than the screen does, within a budget.
+ */
+function insetTiles(key, project, clip) {
+  const sources = insetTileSources(key);
+  if (!sources) return null;
+  const { k, ox, oy } = project;
+  const maxZ = Math.min(...sources.map((src) => src.maxzoom));
+  let z = Math.max(0, Math.min(maxZ, Math.round(Math.log2(Math.max(k, 1) / 256))));
+  const count = (zz) => {
+    const size = k / 2 ** zz;
+    return (Math.ceil(clip.w / size) + 1) * (Math.ceil(clip.h / size) + 1);
+  };
+  while (z > 0 && count(z) > 80) z -= 1;
+
+  const n = 2 ** z;
+  const size = k / n;
+  const tx0 = Math.floor((clip.x - ox) / size);
+  const tx1 = Math.floor((clip.x + clip.w - ox) / size);
+  const ty0 = Math.max(0, Math.floor((clip.y - oy) / size));
+  const ty1 = Math.min(n - 1, Math.floor((clip.y + clip.h - oy) / size));
+  const tiles = [];
+  for (const src of sources) {
+    for (let ty = ty0; ty <= ty1; ty += 1) {
+      for (let tx = tx0; tx <= tx1; tx += 1) {
+        const wx = ((tx % n) + n) % n;
+        const template = src.tiles[(wx + ty) % src.tiles.length];
+        tiles.push({
+          url: template.replace('{z}', z).replace('{x}', wx).replace('{y}', ty),
+          x: ox + tx * size, y: oy + ty * size, size,
+        });
+      }
+    }
+  }
+  return tiles;
+}
+
+/** Tile images shared by the screen and the export, loaded CORS-clean. */
+const TILE_CACHE = new Map();
+function tileImage(url) {
+  let img = TILE_CACHE.get(url);
+  if (!img) {
+    img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.decoding = 'async';
+    img.src = url;
+    TILE_CACHE.set(url, img);
+    if (TILE_CACHE.size > 600) TILE_CACHE.delete(TILE_CACHE.keys().next().value);
+  }
+  return img;
+}
+const tileReady = (img) => img.complete && img.naturalWidth > 0;
+
+/* ------------------------------------------------------------------ */
+/* grid (graticule) — latitude/longitude lines and edge labels          */
+/* ------------------------------------------------------------------ */
+/*
+ * Lines are worked out against the live map, in the element's own unit
+ * square (0–1 across, 0–1 down), so the screen and a 300 dpi export draw the
+ * same thing at their own resolution. Under Web Mercator with no tilt a
+ * meridian or parallel is a straight line on screen even when the map is
+ * rotated, so two projected points per line are enough.
+ */
+const GRID_STEPS = [
+  1 / 3600, 2 / 3600, 5 / 3600, 10 / 3600, 15 / 3600, 30 / 3600,
+  1 / 60, 2 / 60, 5 / 60, 10 / 60, 15 / 60, 30 / 60,
+  1, 2, 5, 10, 15, 20, 30, 45,
+];
+
+/** A tidy interval for the span: about four to eight lines on the long side. */
+export function gridStep(span) {
+  return GRID_STEPS.find((s) => span / s <= 8) ?? 45;
+}
+
+/** 7.5 → 7°30′E, at no more precision than the interval needs. */
+export function gridLabel(value, axis, step, format = 'dms') {
+  const hemi = axis === 'lng' ? (value >= 0 ? 'E' : 'W') : (value >= 0 ? 'N' : 'S');
+  const abs = Math.abs(value);
+  if (format === 'dd') {
+    const dp = step >= 1 ? 0 : step >= 0.1 ? 1 : step >= 0.01 ? 2 : step >= 0.001 ? 3 : 4;
+    return `${abs.toFixed(dp)}°${hemi}`;
+  }
+  // Rounded to the nearest second first, so 7.9999999 prints as 8°, not 7°59′60″.
+  const total = Math.round(abs * 3600);
+  const d = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const sec = total % 60;
+  if (step >= 1 && !m && !sec) return `${d}°${hemi}`;
+  if (step >= 1 / 60 && !sec) return `${d}°${String(m).padStart(2, '0')}′${hemi}`;
+  return `${d}°${String(m).padStart(2, '0')}′${String(sec).padStart(2, '0')}″${hemi}`;
+}
+
+/** Clip the segment p→q to the unit square (Liang–Barsky). */
+function clipUnit(p, q) {
+  let t0 = 0;
+  let t1 = 1;
+  const dx = q[0] - p[0];
+  const dy = q[1] - p[1];
+  for (const [pk, qk] of [[-dx, p[0]], [dx, 1 - p[0]], [-dy, p[1]], [dy, 1 - p[1]]]) {
+    if (pk === 0) { if (qk < 0) return null; continue; }
+    const t = qk / pk;
+    if (pk < 0) { if (t > t1) return null; if (t > t0) t0 = t; } else { if (t < t0) return null; if (t < t1) t1 = t; }
+  }
+  return [[p[0] + t0 * dx, p[1] + t0 * dy], [p[0] + t1 * dx, p[1] + t1 * dy]];
+}
+
+const edgeOf = ([x, y]) => {
+  const e = 1e-3;
+  if (y <= e) return 'top';
+  if (y >= 1 - e) return 'bottom';
+  if (x <= e) return 'left';
+  if (x >= 1 - e) return 'right';
+  return null;
+};
+
+/**
+ * Where the box that element percentages are measured in sits on screen, in
+ * map-container pixels. That is the element layer — the artboard *inside*
+ * its dashed border — not the artboard itself; measuring the outer box put
+ * every grid line a little off, more so the further it was from the corner.
+ */
+function pageOnScreen() {
+  if (typeof document === 'undefined') return null;
+  const layer = document.getElementById('element-layer');
+  const map = getMap();
+  const host = map?.getContainer?.();
+  if (!layer || !host) return null;
+  const r = layer.getBoundingClientRect();
+  const o = host.getBoundingClientRect();
+  if (r.width < 2 || r.height < 2) return null;
+  return { x: r.left - o.left, y: r.top - o.top, w: r.width, h: r.height };
+}
+
+/**
+ * The grid for an element: lines as unit-square segments, and labels where
+ * they meet an edge the user wants labelled. Null without a map.
+ */
+function gridPlan(elm) {
+  const map = getMap();
+  const page = pageOnScreen();
+  if (!map || !page) return null;
+  const s = elm.style ?? {};
+  const ex = page.x + (elm.x / 100) * page.w;
+  const ey = page.y + (elm.y / 100) * page.h;
+  const ew = (elm.w / 100) * page.w;
+  const eh = (elm.h / 100) * page.h;
+  if (ew < 4 || eh < 4) return null;
+
+  const corners = [[ex, ey], [ex + ew, ey], [ex, ey + eh], [ex + ew, ey + eh]].map((p) => map.unproject(p));
+  const lngs = corners.map((c) => c.lng);
+  const lats = corners.map((c) => Math.max(-85, Math.min(85, c.lat)));
+  const minLng = Math.min(...lngs); const maxLng = Math.max(...lngs);
+  const minLat = Math.min(...lats); const maxLat = Math.max(...lats);
+  const auto = !s.interval || s.interval === 'auto';
+  const step = auto ? gridStep(Math.max(maxLng - minLng, maxLat - minLat)) : Number(s.interval);
+  if (!(step > 0)) return null;
+
+  const toUnit = (lng, lat) => {
+    const p = map.project([lng, lat]);
+    return [(p.x - ex) / ew, (p.y - ey) / eh];
+  };
+  const wanted = { top: s.labelTop !== false, bottom: s.labelBottom !== false, left: s.labelLeft !== false, right: s.labelRight !== false };
+  const lines = [];
+  const labels = [];
+  const add = (a, b, value, axis) => {
+    const seg = clipUnit(a, b);
+    if (!seg) return;
+    lines.push({ a: seg[0], b: seg[1], value, axis });
+    for (const end of seg) {
+      const edge = edgeOf(end);
+      // Labels hard against a corner collide with the other axis's labels.
+      const along = edge === 'top' || edge === 'bottom' ? end[0] : end[1];
+      if (edge && wanted[edge] && along > 0.035 && along < 0.965) {
+        labels.push({ edge, u: end[0], v: end[1], text: gridLabel(value, axis, step, s.format) });
+      }
+    }
+  };
+  const round = (v) => Math.round(v / step) * step;
+  const padLat = (maxLat - minLat) * 0.5 + step;
+  const padLng = (maxLng - minLng) * 0.5 + step;
+  let n = 0;
+  for (let v = Math.ceil(minLng / step) * step; v <= maxLng + 1e-9 && n < 200; v += step, n += 1) {
+    const lng = round(v);
+    add(toUnit(lng, Math.max(-85, minLat - padLat)), toUnit(lng, Math.min(85, maxLat + padLat)), lng, 'lng');
+  }
+  n = 0;
+  for (let v = Math.ceil(minLat / step) * step; v <= maxLat + 1e-9 && n < 200; v += step, n += 1) {
+    const lat = round(v);
+    add(toUnit(minLng - padLng, lat), toUnit(maxLng + padLng, lat), lat, 'lat');
+  }
+  return { lines, labels, step };
+}
+
+/**
+ * Where a label sits, for an SVG or a canvas, in the box's own pixels.
+ *
+ * Outside (the default) is the cartographic convention: longitudes above and
+ * below the frame, latitudes beside it turned to read upwards — turned so
+ * that a label like 9°30′N needs only a text-height of margin, not its whole
+ * width. Inside keeps everything within the frame, for a full-bleed page
+ * with no margin to put labels in.
+ *
+ * `rotate` is in degrees about (x, y).
+ */
+function gridLabelPlacement(lb, W, H, fs, outside = true) {
+  const pad = fs * 0.4;
+  if (outside) {
+    switch (lb.edge) {
+      case 'top': return { x: lb.u * W, y: -pad, anchor: 'middle', baseline: 'auto', rotate: 0 };
+      case 'bottom': return { x: lb.u * W, y: H + pad, anchor: 'middle', baseline: 'hanging', rotate: 0 };
+      // Turned -90°: "above the baseline" now points left, away from the frame.
+      case 'left': return { x: -pad, y: lb.v * H, anchor: 'middle', baseline: 'auto', rotate: -90 };
+      // Same turn; hanging below the baseline points right, away from the frame.
+      default: return { x: W + pad, y: lb.v * H, anchor: 'middle', baseline: 'hanging', rotate: -90 };
+    }
+  }
+  const clampX = (x) => Math.max(fs * 2.2, Math.min(W - fs * 2.2, x));
+  const clampY = (y) => Math.max(fs, Math.min(H - fs, y));
+  switch (lb.edge) {
+    case 'top': return { x: clampX(lb.u * W), y: pad, anchor: 'middle', baseline: 'hanging', rotate: 0 };
+    case 'bottom': return { x: clampX(lb.u * W), y: H - pad, anchor: 'middle', baseline: 'auto', rotate: 0 };
+    case 'left': return { x: pad, y: clampY(lb.v * H), anchor: 'start', baseline: 'middle', rotate: 0 };
+    default: return { x: W - pad, y: clampY(lb.v * H), anchor: 'end', baseline: 'middle', rotate: 0 };
+  }
+}
+
+/** The inset's outlines on a canvas: surrounding region, study area, view box. */
+function paintInsetShapes(c, s, plan, w) {
+  const trace = (rings) => {
+    c.beginPath();
+    for (const ring of rings) {
+      ring.forEach(([x, y], i) => (i ? c.lineTo(x, y) : c.moveTo(x, y)));
+      c.closePath();
+    }
+  };
+
+  c.save();
+  c.lineJoin = 'round';
+
+  // The surrounding region first, so the study area reads as sitting
+  // inside it rather than beside it. Over a basemap it is a tint, not a
+  // solid fill, or it would hide the map it is meant to sit on.
+  if (plan.context) {
+    trace(plan.context);
+    c.fillStyle = rgba(s.contextFill, plan.tiles ? (s.contextOpacity ?? 0.3) : 1);
+    c.fill('evenodd');
+    c.strokeStyle = s.contextStroke;
+    c.lineWidth = w * 0.75;
+    c.stroke();
+  }
+
+  trace(plan.area);
+  c.fillStyle = rgba(s.fill, s.fillOpacity);
+  c.fill('evenodd');
+  c.strokeStyle = s.stroke;
+  c.lineWidth = w;
+  c.stroke();
+
+  if (plan.extent) {
+    c.strokeStyle = s.extentStroke;
+    c.lineWidth = w;
+    c.strokeRect(plan.extent.x, plan.extent.y, plan.extent.w, plan.extent.h);
+  }
+  c.restore();
+}
+
+/**
+ * Fetch every basemap tile the export's insets will draw, before painting
+ * starts — a canvas cannot wait for an image mid-draw. A tile that fails or
+ * takes longer than the timeout is left out instead of stopping the export.
+ *
+ * @param {{elm: object, box: {x,y,w,h}}[]} jobs  inset elements with their
+ *        content boxes in export pixels
+ */
+export function preloadInsetTiles(jobs, timeoutMs = 12000) {
+  const urls = new Set();
+  for (const { elm, box } of jobs) {
+    for (const t of insetPlan(elm, box)?.tiles ?? []) urls.add(t.url);
+  }
+  const loads = [...urls].map((url) => {
+    const img = tileImage(url);
+    if (img.complete) return Promise.resolve();
+    return new Promise((resolve) => {
+      img.addEventListener('load', resolve, { once: true });
+      img.addEventListener('error', resolve, { once: true });
+    });
+  });
+  const timeout = new Promise((resolve) => setTimeout(resolve, timeoutMs));
+  return Promise.race([Promise.all(loads), timeout]);
+}
+
+/** The inset's view, after zooming by `steps` (powers of two) about a point. */
+export function zoomInsetView(style, steps, about = [0, 0]) {
+  const zoom = Math.max(-3, Math.min(8, (Number(style.viewZoom) || 0) + steps));
+  const f = 2 ** (zoom - (Number(style.viewZoom) || 0));
+  const [px, py] = style.viewPan ?? [0, 0];
+  // Keep the point under `about` (a fraction of the box from its centre) still.
+  return { viewZoom: zoom, viewPan: [(px - about[0]) * f + about[0], (py - about[1]) * f + about[1]] };
 }
 
 /** Every polygon ring of a GeoJSON, projected and thinned for drawing. */
@@ -439,8 +775,9 @@ function insetPlan(elm, box) {
   // One projection for every ring, taken from whichever outline is widest, so
   // the study area sits where it really sits inside the context.
   const reference = ctx?.geojson ?? sa.geojson;
-  const project = ringProjector(reference, frame);
+  const project = ringProjector(reference, frame, { zoom: s.viewZoom, pan: s.viewPan });
   if (!project) return null;
+  const tiles = insetTiles(s.basemap, project, { x: box?.x ?? 0, y: box?.y ?? 0, w: W, h: H });
 
   const area = ringsOf(sa.geojson, project);
   if (!area?.length) return null;
@@ -462,6 +799,7 @@ function insetPlan(elm, box) {
   return {
     W, H,
     area,
+    tiles,
     context: ctx ? ringsOf(ctx.geojson, project) : null,
     extent,
     stroke: box ? 1 : Math.max(0.6, Math.min(W, H) * 0.012),
@@ -634,46 +972,49 @@ export const ELEMENT_TYPES = {
 
   stats: {
     label: 'Key figures', icon: '◫', hint: 'Study area, feature counts, analysis results',
-    inspect: ['heading', 'type', 'chrome'],
+    inspect: ['heading', 'rows', 'type', 'chrome'],
+    rows: () => statsRows(),
     defaults: { x: 68, y: 72, w: 26, h: 20, text: 'Key figures' },
     style: { ...TEXT, ...CARD, size: 11, gap: 2.4 },
     dom(inner, elm, ctx) {
       const { u } = ctx;
-      inner.innerHTML = headingHtml(elm.text, elm.style, u) + rowsHtml(statsRows(), u, elm.style);
+      inner.innerHTML = headingHtml(elm.text, elm.style, u) + rowsHtml(editRows(statsRows(), elm.rowEdits), u, elm.style);
     },
     paint(c, elm, box, ctx) {
       const s = elm.style;
       const y = paintHeading(c, elm.text, box, s, ctx.u);
-      paintRows(c, statsRows(), { ...box, y, h: box.h - (y - box.y) }, s, ctx.u);
+      paintRows(c, editRows(statsRows(), elm.rowEdits), { ...box, y, h: box.h - (y - box.y) }, s, ctx.u);
     },
   },
 
   metadata: {
     label: 'Map information', icon: 'ℹ', hint: 'Author, date, projection, sources',
-    inspect: ['heading', 'type', 'chrome'],
+    inspect: ['heading', 'rows', 'type', 'chrome'],
+    rows: () => metadataRows(),
     defaults: { x: 68, y: 46, w: 26, h: 24, text: 'Map information' },
     style: { ...TEXT, ...CARD, size: 9, gap: 2.2, lineHeight: 1.28 },
     dom(inner, elm, ctx) {
       const { u } = ctx;
-      inner.innerHTML = headingHtml(elm.text, elm.style, u) + rowsHtml(metadataRows(), u, elm.style);
+      inner.innerHTML = headingHtml(elm.text, elm.style, u) + rowsHtml(editRows(metadataRows(), elm.rowEdits), u, elm.style);
     },
     paint(c, elm, box, ctx) {
       const s = elm.style;
       const y = paintHeading(c, elm.text, box, s, ctx.u);
-      paintRows(c, metadataRows(), { ...box, y, h: box.h - (y - box.y) }, s, ctx.u, { valueWeight: 500 });
+      paintRows(c, editRows(metadataRows(), elm.rowEdits), { ...box, y, h: box.h - (y - box.y) }, s, ctx.u, { valueWeight: 500 });
     },
   },
 
   credits: {
     label: 'Credits', icon: '©', hint: 'Data attribution — required by OpenStreetMap',
-    inspect: ['type', 'chrome'],
+    inspect: ['creditsText', 'type', 'chrome'],
     defaults: { x: 6, y: 95.5, w: 60, h: 3.4 },
     style: { ...TEXT, ...PLAIN, size: 7.5, color: '#64748b', lineHeight: 1.35 },
+    // `elm.customText`, when set, replaces the automatic attribution.
     dom(inner, elm) {
-      inner.textContent = creditsText();
+      inner.textContent = elm.customText || creditsText();
     },
     paint(c, elm, box, ctx) {
-      drawParagraph(c, creditsText(), box, { ...elm.style, u: ctx.u, maxLines: 3 });
+      drawParagraph(c, elm.customText || creditsText(), box, { ...elm.style, u: ctx.u, maxLines: 3 });
     },
   },
 
@@ -810,6 +1151,92 @@ export const ELEMENT_TYPES = {
     },
   },
 
+  grid: {
+    label: 'Grid & labels', icon: '#', hint: 'Latitude/longitude lines with coordinate labels at the edges',
+    inspect: ['grid', 'type'],
+    defaults: { x: 0, y: 0, w: 100, h: 100 },
+    style: {
+      ...TEXT, ...PLAIN, size: 10, weight: 700, color: '#1f2937',
+      lineColor: '#334155', lineWidth: 0.9, lineOpacity: 0.7, dash: 'solid',
+      showLines: true, showLabels: true, halo: true, labelPosition: 'outside',
+      interval: 'auto', format: 'dms',
+      labelTop: true, labelBottom: true, labelLeft: true, labelRight: true,
+    },
+    dom(inner, elm, ctx) {
+      const box = boxOfNode(inner);
+      const plan = box && gridPlan(elm);
+      if (!plan) { inner.innerHTML = ''; return; }
+      const s = elm.style;
+      const { u } = ctx;
+      const W = box.w;
+      const H = box.h;
+      const lw = Math.max(0.5, u(s.lineWidth));
+      const dash = s.dash === 'dashed' ? `stroke-dasharray="${(lw * 5).toFixed(1)} ${(lw * 3.5).toFixed(1)}"` : '';
+      const lines = s.showLines === false ? '' : plan.lines.map((l) =>
+        `<line x1="${(l.a[0] * W).toFixed(2)}" y1="${(l.a[1] * H).toFixed(2)}" x2="${(l.b[0] * W).toFixed(2)}" y2="${(l.b[1] * H).toFixed(2)}" stroke="${s.lineColor}" stroke-opacity="${s.lineOpacity ?? 0.7}" stroke-width="${lw.toFixed(2)}" ${dash}/>`).join('');
+      const fs = u(s.size);
+      const family = esc(FONTS[s.font]?.stack ?? FONTS.sans.stack);
+      const outside = s.labelPosition !== 'inside';
+      const labels = s.showLabels === false ? '' : plan.labels.map((lb) => {
+        const p = gridLabelPlacement(lb, W, H, fs, outside);
+        const halo = s.halo ? `paint-order="stroke" stroke="#ffffff" stroke-width="${(fs * 0.28).toFixed(2)}" stroke-linejoin="round"` : '';
+        const turn = p.rotate ? `transform="rotate(${p.rotate} ${p.x.toFixed(2)} ${p.y.toFixed(2)})"` : '';
+        return `<text x="${p.x.toFixed(2)}" y="${p.y.toFixed(2)}" ${turn} text-anchor="${p.anchor}" dominant-baseline="${p.baseline}" font-size="${fs.toFixed(2)}" font-weight="${s.weight ?? 600}" font-family="${family}" fill="${s.color}" ${halo}>${esc(lb.text)}</text>`;
+      }).join('');
+      // Lines are already clipped to the frame; labels outside it must not be.
+      inner.style.overflow = outside ? 'visible' : 'hidden';
+      inner.innerHTML = `<svg width="${W}" height="${H}" viewBox="0 0 ${W.toFixed(2)} ${H.toFixed(2)}" style="display:block;overflow:${outside ? 'visible' : 'hidden'}">${lines}${labels}</svg>`;
+    },
+    paint(c, elm, box, ctx) {
+      const plan = gridPlan(elm);
+      if (!plan) return;
+      const s = elm.style;
+      const { u } = ctx;
+      const lw = Math.max(0.5, u(s.lineWidth));
+      c.save();
+      c.beginPath();
+      c.rect(box.x, box.y, box.w, box.h);
+      c.clip();
+      if (s.showLines !== false) {
+        c.strokeStyle = rgba(s.lineColor, s.lineOpacity ?? 0.7);
+        c.lineWidth = lw;
+        c.setLineDash(s.dash === 'dashed' ? [lw * 5, lw * 3.5] : []);
+        for (const l of plan.lines) {
+          c.beginPath();
+          c.moveTo(box.x + l.a[0] * box.w, box.y + l.a[1] * box.h);
+          c.lineTo(box.x + l.b[0] * box.w, box.y + l.b[1] * box.h);
+          c.stroke();
+        }
+        c.setLineDash([]);
+      }
+      const outside = s.labelPosition !== 'inside';
+      // Labels outside the frame are drawn after the clip is lifted.
+      if (outside) { c.restore(); c.save(); }
+      if (s.showLabels !== false) {
+        const fs = u(s.size);
+        c.font = `${s.italic ? 'italic ' : ''}${s.weight ?? 600} ${fs}px ${FONTS[s.font]?.stack ?? FONTS.sans.stack}`;
+        for (const lb of plan.labels) {
+          const p = gridLabelPlacement(lb, box.w, box.h, fs, outside);
+          c.save();
+          c.translate(box.x + p.x, box.y + p.y);
+          if (p.rotate) c.rotate((p.rotate * Math.PI) / 180);
+          c.textAlign = p.anchor === 'middle' ? 'center' : p.anchor === 'end' ? 'right' : 'left';
+          c.textBaseline = p.baseline === 'hanging' ? 'top' : p.baseline === 'auto' ? 'alphabetic' : 'middle';
+          if (s.halo) {
+            c.lineJoin = 'round';
+            c.strokeStyle = '#ffffff';
+            c.lineWidth = fs * 0.28;
+            c.strokeText(lb.text, 0, 0);
+          }
+          c.fillStyle = s.color;
+          c.fillText(lb.text, 0, 0);
+          c.restore();
+        }
+      }
+      c.restore();
+    },
+  },
+
   inset: {
     label: 'Locator inset', icon: '⊞', hint: 'Where the study area sits in the wider region',
     inspect: ['inset', 'chrome'],
@@ -817,17 +1244,26 @@ export const ELEMENT_TYPES = {
     style: {
       ...TEXT, ...CARD, size: 8, color: '#0f172a',
       fill: '#38bdf8', stroke: '#0369a1', fillOpacity: 0.55, padding: 5,
-      context: 'auto', contextFill: '#e2e8f0', contextStroke: '#94a3b8',
+      context: 'auto', contextFill: '#e2e8f0', contextStroke: '#94a3b8', contextOpacity: 0.3,
       extent: false, extentStroke: '#dc2626',
+      // A real map under the outlines, and the inset's own view of it.
+      basemap: 'canvas-light', viewZoom: 0, viewPan: [0, 0],
     },
-    dom(inner, elm) {
+    dom(inner, elm, ctx) {
       // Measured, not derived. An element's `w` is a percentage of page width
       // and its `h` a percentage of page *height*, so w/h is not its aspect
       // ratio on any paper that is not square — and an inset drawn to the
       // wrong aspect is an outline of the wrong shape. The node is positioned
       // before this runs, so its real pixel box is there to be read, and using
       // it makes the preview identical to the canvas path by construction.
-      const plan = insetPlan(elm, boxOfNode(inner));
+      // Padding and border come off it, because that is the box the drawing
+      // gets — the same content box the canvas path is handed.
+      const outer = boxOfNode(inner);
+      const pad = ctx?.u ? ctx.u(elm.style.padding ?? 0) + ctx.u(elm.style.borderWidth ?? 0) : 0;
+      const measured = outer && outer.w - pad * 2 > 2 && outer.h - pad * 2 > 2
+        ? { x: 0, y: 0, w: outer.w - pad * 2, h: outer.h - pad * 2 }
+        : outer;
+      const plan = insetPlan(elm, measured);
       if (!plan) {
         inner.innerHTML = '<div style="height:100%;display:grid;place-items:center;opacity:.5;text-align:center">Load a study area</div>';
         return;
@@ -838,15 +1274,23 @@ export const ELEMENT_TYPES = {
       // be a square viewBox stretched with preserveAspectRatio="none", which
       // squashed every outline on screen by exactly the amount the element was
       // off square — and then printed it correctly, so the two disagreed.
-      const { W, H, context, area, extent, stroke } = plan;
+      const { W, H, context, area, extent, stroke, tiles } = plan;
       const path = (rings) => (rings ?? [])
         .map((r) => `M${r.map(([x, y]) => `${x.toFixed(2)},${y.toFixed(2)}`).join('L')}Z`).join('');
+      const pct = (v, of) => `${((v / of) * 100).toFixed(4)}%`;
+      // Tiles are placed in percent of the drawing, with a hair of overlap so
+      // no seam shows between them at fractional sizes.
+      const tileHtml = (tiles ?? []).map((t) => `<img src="${esc(t.url)}" alt="" draggable="false" crossorigin="anonymous" style="position:absolute;left:${pct(t.x, W)};top:${pct(t.y, H)};width:calc(${pct(t.size, W)} + 0.6px);height:calc(${pct(t.size, H)} + 0.6px);max-width:none;user-select:none;pointer-events:none">`).join('');
+      const contextOpacity = tiles ? (s.contextOpacity ?? 0.3) : 1;
 
-      inner.innerHTML = `<svg viewBox="0 0 ${W.toFixed(3)} ${H.toFixed(3)}" preserveAspectRatio="none" style="width:100%;height:100%;display:block">
-        ${context ? `<path d="${path(context)}" fill="${rgba(s.contextFill, 1)}" stroke="${s.contextStroke}" stroke-width="${stroke * 0.75}" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>` : ''}
+      inner.innerHTML = `<div class="inset-view" style="position:relative;width:100%;height:100%;overflow:hidden">
+        ${tileHtml}
+        <svg viewBox="0 0 ${W.toFixed(3)} ${H.toFixed(3)}" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%;display:block">
+        ${context ? `<path d="${path(context)}" fill="${rgba(s.contextFill, contextOpacity)}" stroke="${s.contextStroke}" stroke-width="${stroke * 0.75}" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>` : ''}
         <path d="${path(area)}" fill="${rgba(s.fill, s.fillOpacity)}" stroke="${s.stroke}" stroke-width="${stroke}" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
         ${extent ? `<rect x="${extent.x.toFixed(2)}" y="${extent.y.toFixed(2)}" width="${extent.w.toFixed(2)}" height="${extent.h.toFixed(2)}" fill="none" stroke="${s.extentStroke}" stroke-width="${stroke}" vector-effect="non-scaling-stroke"/>` : ''}
-      </svg>`;
+        </svg>
+      </div>`;
     },
     paint(c, elm, box, ctx) {
       const plan = insetPlan(elm, box);
@@ -854,40 +1298,23 @@ export const ELEMENT_TYPES = {
       const s = elm.style;
       const w = Math.max(0.7, ctx.u(0.8));
 
-      const trace = (rings) => {
-        c.beginPath();
-        for (const ring of rings) {
-          ring.forEach(([x, y], i) => (i ? c.lineTo(x, y) : c.moveTo(x, y)));
-          c.closePath();
-        }
-      };
-
+      // Basemap tiles first, clipped to the box. They were fetched by
+      // preloadInsetTiles() before the export started painting; any that
+      // failed are skipped rather than holding the export up.
       c.save();
-      c.lineJoin = 'round';
-
-      // The surrounding region first, so the study area reads as sitting
-      // inside it rather than beside it.
-      if (plan.context) {
-        trace(plan.context);
-        c.fillStyle = rgba(s.contextFill, 1);
-        c.fill('evenodd');
-        c.strokeStyle = s.contextStroke;
-        c.lineWidth = w * 0.75;
-        c.stroke();
+      c.beginPath();
+      c.rect(box.x, box.y, box.w, box.h);
+      c.clip();
+      if (plan.tiles) {
+        c.imageSmoothingEnabled = true;
+        c.imageSmoothingQuality = 'high';
+        for (const t of plan.tiles) {
+          const img = tileImage(t.url);
+          if (!tileReady(img)) continue;
+          try { c.drawImage(img, t.x, t.y, t.size + 0.5, t.size + 0.5); } catch { /* tainted or broken tile */ }
+        }
       }
-
-      trace(plan.area);
-      c.fillStyle = rgba(s.fill, s.fillOpacity);
-      c.fill('evenodd');
-      c.strokeStyle = s.stroke;
-      c.lineWidth = w;
-      c.stroke();
-
-      if (plan.extent) {
-        c.strokeStyle = s.extentStroke;
-        c.lineWidth = w;
-        c.strokeRect(plan.extent.x, plan.extent.y, plan.extent.w, plan.extent.h);
-      }
+      paintInsetShapes(c, s, plan, w);
       c.restore();
     },
   },
@@ -943,7 +1370,7 @@ export const ELEMENT_TYPES = {
 /** Order shown in the "Add element" panel. */
 export const ELEMENT_ORDER = [
   'title', 'subtitle', 'text', 'legend', 'stats', 'metadata',
-  'north', 'scale', 'inset', 'shape', 'logo', 'neatline', 'credits',
+  'north', 'scale', 'inset', 'shape', 'logo', 'neatline', 'grid', 'credits',
 ];
 
 /* ------------------------------------------------------------------ */

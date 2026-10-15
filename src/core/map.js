@@ -19,8 +19,17 @@ import { debounce } from './dom.js';
 let map = null;
 const styleReadyHandlers = new Set();
 
+/*
+ * True from a base style's 'style.load' until the next setStyle(). That is
+ * the window in which sources and layers can be added — which is all the
+ * overlays need. `map.isStyleLoaded()` is the wrong test for it: it also
+ * waits on every tile and sprite, can stay false for a long while after a
+ * basemap swap, and the overlays waiting on it were simply never re-added.
+ */
+let styleParsed = false;
+
 export const getMap = () => map;
-export const isReady = () => Boolean(map && map.isStyleLoaded());
+export const isReady = () => Boolean(map && styleParsed);
 
 /** Run `fn` every time a base style finishes loading (including the first). */
 export function onStyleReady(fn) {
@@ -105,6 +114,7 @@ export function initMap(container = 'map') {
   map.addControl(new maplibregl.ScaleControl({ maxWidth: 110, unit: 'metric' }), 'bottom-left');
 
   map.on('style.load', () => {
+    styleParsed = true;
     applyBasemapGroups(state.basemapGroups);
     applyTerrain(state.terrain);
     fireStyleReady();
@@ -131,7 +141,12 @@ export function initMap(container = 'map') {
 export function setBasemap(key) {
   if (!map || !BASEMAPS[key]) return;
   set({ basemap: key }, { history: false });
-  map.setStyle(styleFor(key));       // 'style.load' re-adds everything
+  // A full reload, not a diff. MapLibre's default diffs one style into the
+  // next, which deletes every layer the new style does not list — our study
+  // area and data overlays — and never fires 'style.load', so nothing put
+  // them back. With diff off, 'style.load' always fires and re-adds them.
+  styleParsed = false;
+  map.setStyle(styleFor(key), { diff: false });
 }
 
 /**
@@ -162,7 +177,7 @@ export function applyBasemapGroups(groups) {
 /* 3-D terrain                                                         */
 /* ------------------------------------------------------------------ */
 export function applyTerrain(on, exaggeration = 1.4) {
-  if (!map || !map.isStyleLoaded()) return;
+  if (!isReady()) return;
   try {
     if (on) {
       if (!map.getSource('gds-dem')) map.addSource('gds-dem', TERRAIN_SOURCE);
@@ -186,7 +201,7 @@ export function applyTerrain(on, exaggeration = 1.4) {
 
 /** Extrude OSM buildings — the "3D city" templates use this. */
 export function applyBuildingExtrusion(on, color = '#cbd5e1') {
-  if (!map || !map.isStyleLoaded()) return;
+  if (!isReady()) return;
   const id = 'gds-3d-buildings';
   try {
     if (!on) { if (map.getLayer(id)) map.removeLayer(id); return; }

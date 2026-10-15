@@ -56,6 +56,39 @@ export function statsRows() {
   return rows;
 }
 
+/**
+ * The rows a block actually prints: the derived ones, with the user's edits
+ * laid over them.
+ *
+ * Edits are kept beside the derived rows rather than replacing them, so a
+ * row nobody touched stays live — the date, the centre and the zoom keep
+ * following the map — while a row someone typed into keeps what they typed.
+ *
+ * @param {{label:string, value:string}[]} rows  derived rows
+ * @param {object} [edits]  `elm.rowEdits`:
+ *        `rows`  — per derived row, keyed by its original label:
+ *                  `{ label?, value?, hidden? }` (an empty string = automatic)
+ *        `extra` — rows the user added: `{ label, value }`
+ */
+export function editRows(rows, edits) {
+  if (!edits) return rows;
+  const out = [];
+  for (const row of rows) {
+    const e = edits.rows?.[row.label];
+    if (e?.hidden) continue;
+    out.push({
+      ...row,
+      label: e?.label ? e.label : row.label,
+      value: e?.value ? e.value : row.value,
+      muted: e?.value ? false : row.muted,
+    });
+  }
+  for (const extra of edits.extra ?? []) {
+    if (extra.label || extra.value) out.push({ label: extra.label ?? '', value: extra.value ?? '' });
+  }
+  return out;
+}
+
 /** Map-information block: who, when, what projection, which sources. */
 export function metadataRows() {
   const paper = PAPER_SIZES[state.page.size];

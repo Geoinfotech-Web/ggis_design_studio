@@ -14,6 +14,7 @@ import { GALLERY_CATEGORIES, galleryTemplates, templateById } from '../../templa
 import { applyTemplate } from '../../templates/apply.js';
 import { CONTRIBUTIONS, CONTRIBUTOR } from '../../data/contributions.js';
 import { templatePreview, sheetUrl } from '../preview.js';
+import { templateCard } from '../template-info.js';
 import { PAPER_SIZES, paperDimsLabel } from '../../core/constants.js';
 import { resizeSoon } from '../../core/map.js';
 import { formatArea } from '../../core/geo.js';
@@ -107,15 +108,10 @@ function newMapBody() {
 }
 
 function templateBody() {
-  const grid = el('div.tpl-grid.tpl-grid--flush', {}, galleryTemplates(category).map((tpl) => {
-    const card = el('button.tpl-card', { type: 'button', title: `${tpl.name} — ${tpl.blurb}` }, [
-      el('div.tpl-thumb', {}, [templatePreview(tpl)]),
-      el('div.tpl-meta', {}, [el('strong', { text: tpl.name }), el('span', { text: tpl.tags.join(' · ') })]),
-    ]);
-    card.classList.toggle('is-active', state.mapStarted && tpl.id === state.templateId);
-    card.addEventListener('click', () => startMap(tpl.id));
-    return card;
-  }));
+  const grid = el('div.tpl-grid.tpl-grid--flush', {}, galleryTemplates(category).map((tpl) => templateCard(tpl, {
+    active: state.mapStarted && tpl.id === state.templateId,
+    onUse: () => startMap(tpl.id),
+  })));
   return [
     pillRow(GALLERY_CATEGORIES, category, (id) => { category = id; render(); }),
     grid,
@@ -136,12 +132,14 @@ function previewSheet(item, image) {
 }
 
 function contributorBody() {
-  const visible = showAllSheets ? CONTRIBUTIONS : CONTRIBUTIONS.slice(0, 6);
-  const more = el('button.start-more', {
+  // A short list is shown whole; only a long one is folded behind "Show all".
+  const folds = CONTRIBUTIONS.length > 8;
+  const visible = showAllSheets || !folds ? CONTRIBUTIONS : CONTRIBUTIONS.slice(0, 6);
+  const more = folds ? el('button.start-more', {
     type: 'button',
     text: showAllSheets ? 'Show fewer' : `Show all ${CONTRIBUTIONS.length} sheets`,
-  });
-  more.addEventListener('click', () => { showAllSheets = !showAllSheets; render(); });
+  }) : null;
+  more?.addEventListener('click', () => { showAllSheets = !showAllSheets; render(); });
 
   return [
     el('p.start-note', { text: `Real sheets by the ${CONTRIBUTOR}. Use one and you get its layout — margins, title, key and scale — around your own study area.` }),

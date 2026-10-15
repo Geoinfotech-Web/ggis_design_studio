@@ -13,8 +13,8 @@ import { state } from '../core/store.js';
 import { getMap, lookFilter, maplibregl } from '../core/map.js';
 import { APP, effectiveDpi } from '../core/constants.js';
 import { buildRenderContext } from '../layout/derive.js';
-import { paintElement, preloadElementAssets } from '../layout/elements.js';
-import { paperDims, artboardRect } from '../ui/artboard.js';
+import { paintElement, preloadElementAssets, preloadInsetTiles, contentBox } from '../layout/elements.js';
+import { paperDims, artboardRect, layoutViewSnapshot, fitLayout, restoreLayoutView } from '../ui/artboard.js';
 
 /** Wait for the map to finish drawing, but never hang the export. */
 function mapIdle(timeout = 2500) {
@@ -264,6 +264,22 @@ function paintVignette(c, W, H, amount) {
  * @returns {Promise<HTMLCanvasElement>}
  */
 export async function composeExport(opts = {}) {
+  // The map is cropped from what is on screen, so a page zoomed past the
+  // edges of the canvas would export with its edges missing. A real export
+  // fits the page first and puts the view back after. The autosave thumbnail
+  // (`fast`) runs on every edit and must not make the page jump, so it skips
+  // this — at worst a thumbnail taken while zoomed in is cropped.
+  const snap = layoutViewSnapshot();
+  const zoomed = snap.zoom !== 1 || snap.dx || snap.dy;
+  if (!opts.fast && zoomed) fitLayout();
+  try {
+    return await composeExportFitted(opts);
+  } finally {
+    if (!opts.fast && zoomed) restoreLayoutView(snap);
+  }
+}
+
+async function composeExportFitted(opts) {
   const dpi = opts.dpi ?? state.page.dpi ?? 150;
   const { wIn, hIn } = paperDims();
 
@@ -326,14 +342,24 @@ export async function composeExport(opts = {}) {
   /* --- elements ---------------------------------------------------- */
   opts.onProgress?.('Drawing map elements…');
   const ctx = buildRenderContext({ W, H, artWScreen: rect.w || W, media: 'export' });
+  const pageBox = (elm) => ({
+    x: (elm.x / 100) * W,
+    y: (elm.y / 100) * H,
+    w: (elm.w / 100) * W,
+    h: (elm.h / 100) * H,
+  });
+
+  // Inset basemaps are drawn from tiles at print resolution; fetch them all
+  // first, since a canvas cannot wait for an image halfway through drawing.
+  const insets = state.elements.filter((elm) => elm.type === 'inset' && !elm.hidden);
+  if (insets.length) {
+    opts.onProgress?.('Fetching inset map tiles…');
+    await preloadInsetTiles(insets.map((elm) => ({ elm, box: contentBox(pageBox(elm), elm.style, ctx.u) })));
+  }
+
   for (const elm of state.elements) {
     if (elm.hidden) continue;
-    const box = {
-      x: (elm.x / 100) * W,
-      y: (elm.y / 100) * H,
-      w: (elm.w / 100) * W,
-      h: (elm.h / 100) * H,
-    };
+    const box = pageBox(elm);
     try {
       paintElement(c, elm, box, ctx);
     } catch (err) {

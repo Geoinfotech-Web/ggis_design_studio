@@ -749,6 +749,66 @@ export const TEMPLATES = [
     ],
   },
 
+  {
+    id: 'gid-outbreak-dashboard',
+    name: 'Outbreak Dashboard',
+    category: 'geoinfotech',
+    photo: 'ebola-distribution.jpg',
+    blurb: 'Dark briefing sheet: block title, three headline-figure cards, framed map, boxed key.',
+    tags: ['Dark', 'Figures', 'Public health'],
+    preview: ['neatline', 'label'],
+    // The original sits on land-cover imagery; satellite keeps that look and,
+    // unlike a continental basemap, stays sharp down to a single district.
+    basemap: 'satellite',
+    look: { filter: 'none', texture: 'none', vignette: 0 },
+    groups: ALL_ON,
+    page: { size: 'a3', orientation: 'landscape' },
+    suggest: { datasets: ['health'] },
+    // Positions measured off the original sheet (1600 × 1131 px).
+    elements: [
+      // The sheet is a dark slate page with the map set into a frame, so the
+      // margins are opaque bands, listed first to sit behind everything.
+      E('shape', 0, 0, 100, 21.6, { style: { variant: 'rectangle', fill: '#222a35', fillOpacity: 1, strokeWidth: 0, radius: 0 } }),
+      E('shape', 0, 94.9, 100, 5.1, { style: { variant: 'rectangle', fill: '#222a35', fillOpacity: 1, strokeWidth: 0, radius: 0 } }),
+      E('shape', 0, 21.6, 4.1, 73.3, { style: { variant: 'rectangle', fill: '#222a35', fillOpacity: 1, strokeWidth: 0, radius: 0 } }),
+      E('shape', 95.8, 21.6, 4.2, 73.3, { style: { variant: 'rectangle', fill: '#222a35', fillOpacity: 1, strokeWidth: 0, radius: 0 } }),
+      E('neatline', 4.1, 22, 91.7, 72.8, { style: { color: '#9aa5b1', borderWidth: 1, inner: false } }),
+
+      E('title', 4.5, 4, 44, 13.5, {
+        text: 'DISTRIBUTION OF DISEASE CASES 2026',
+        style: { font: 'sans', size: 34, weight: 800, align: 'center', color: '#ffffff', lineHeight: 1.1 },
+      }),
+
+      // Three headline-figure cards: a bright label band over a darker value
+      // band, each with its own colour — cases, deaths, fatality rate.
+      E('shape', 50.6, 4.7, 13.4, 13.6, { style: { variant: 'rectangle', fill: '#6a2731', fillOpacity: 1, stroke: '#d93a3a', strokeWidth: 2.2, radius: 0 } }),
+      E('shape', 50.6, 4.7, 13.4, 6.9, { style: { variant: 'rectangle', fill: '#b3262b', fillOpacity: 1, strokeWidth: 0, radius: 0 } }),
+      E('text', 50.6, 6.2, 13.4, 4.4, { text: 'CASES', style: { size: 20, weight: 800, align: 'center', color: '#ffffff' } }),
+      E('text', 50.6, 12.5, 13.4, 4.8, { text: '000', style: { size: 22, weight: 800, align: 'center', color: '#ffffff' } }),
+
+      E('shape', 65.8, 4.7, 13.4, 13.6, { style: { variant: 'rectangle', fill: '#7a4520', fillOpacity: 1, stroke: '#f07a1a', strokeWidth: 2.2, radius: 0 } }),
+      E('shape', 65.8, 4.7, 13.4, 6.9, { style: { variant: 'rectangle', fill: '#c4560e', fillOpacity: 1, strokeWidth: 0, radius: 0 } }),
+      E('text', 65.8, 6.2, 13.4, 4.4, { text: 'DEATHS', style: { size: 20, weight: 800, align: 'center', color: '#ffffff' } }),
+      E('text', 65.8, 12.5, 13.4, 4.8, { text: '00', style: { size: 22, weight: 800, align: 'center', color: '#ffffff' } }),
+
+      E('shape', 81, 4.7, 13.4, 13.6, { style: { variant: 'rectangle', fill: '#132a4b', fillOpacity: 1, stroke: '#1d3c6b', strokeWidth: 2.2, radius: 0 } }),
+      E('shape', 81, 4.7, 13.4, 6.9, { style: { variant: 'rectangle', fill: '#17325c', fillOpacity: 1, strokeWidth: 0, radius: 0 } }),
+      E('text', 81, 6.2, 13.4, 4.4, { text: 'CFR', style: { size: 20, weight: 800, align: 'center', color: '#ffffff' } }),
+      E('text', 81, 12.5, 13.4, 4.8, { text: '0.0%', style: { size: 22, weight: 800, align: 'center', color: '#ffffff' } }),
+
+      // The key is a dark navy box with a light rule, bottom left of the map.
+      E('legend', 8.1, 56.5, 18.8, 36, {
+        text: 'Legend',
+        style: {
+          size: 10, gap: 3, swatch: 16,
+          bg: '#16304f', bgOpacity: 0.96, border: '#cbd5e1', borderWidth: 0.8, radius: 0,
+          color: '#f1f5f9', shadow: false,
+        },
+      }),
+      E('credits', 4.3, 96, 40, 3, { style: { size: 6.4, italic: true, color: '#9aa5b1' } }),
+    ],
+  },
+
   /* ================= BLANK ======================================== */
   {
     id: 'blank',

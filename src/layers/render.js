@@ -16,7 +16,7 @@
  * error, correct paint, correct data, nothing drawn.
  */
 
-import { getMap, onStyleReady } from '../core/map.js';
+import { getMap, onStyleReady, isReady } from '../core/map.js';
 import { state, subscribe } from '../core/store.js';
 import { pagePxPerMm } from '../ui/artboard.js';
 import { debounce } from '../core/dom.js';
@@ -285,17 +285,19 @@ let retryQueued = false;
 /**
  * Rebuild every overlay from the registry.
  *
- * `isStyleLoaded()` is false during any style mutation and while tiles are
- * still arriving — which is exactly the moment a layer usually gets added,
- * since fetching data is normally followed by a camera move. Returning early
- * used to drop that redraw on the floor and the layer never appeared. Now the
- * request is deferred to the next idle frame instead.
+ * Layers can be added as soon as the base style has loaded (`isReady()`),
+ * whether or not its tiles have arrived. Waiting on `map.isStyleLoaded()`
+ * instead — which also waits on every tile — is what made the study area and
+ * data vanish after a template changed the basemap: the redraw was deferred
+ * to an idle that came too late or not at all. While a new base style is
+ * still loading there is nothing to add to; its 'style.load' calls this again
+ * through onStyleReady, and the idle retry is only a backstop.
  */
 export function syncLayers() {
   const map = getMap();
   if (!map) return;
 
-  if (!map.isStyleLoaded()) {
+  if (!isReady()) {
     if (!retryQueued) {
       retryQueued = true;
       map.once('idle', () => { retryQueued = false; syncLayers(); });
@@ -324,7 +326,8 @@ export function initLayerRendering() {
   // `page` as well as `layers`: a line width is millimetres of paper, so
   // changing the paper size changes how many pixels that is. Without this a
   // 0.5 mm road stays the pixel count it was on A4 after you switch to A0.
-  subscribe(['layers', 'page'], syncLayers);
+  // `layoutView` too: zooming the page on screen changes pixels per mm.
+  subscribe(['layers', 'page', 'layoutView'], syncLayers);
 
   // And so does resizing the window, which rescales the artboard without any
   // state changing. Listened for here rather than called from artboard.js so

@@ -7,7 +7,8 @@
  */
 
 import { $, el, fill } from '../../core/dom.js';
-import { state, subscribe, listProjects, deleteProject, librarySyncFailing } from '../../core/store.js';
+import { state, subscribe, listProjects, deleteProject, renameProject, librarySyncFailing } from '../../core/store.js';
+import { notify } from '../../core/toast.js';
 import { templateById, galleryTemplates } from '../../templates/catalog.js';
 import { templatePreview } from '../preview.js';
 import { head, section, button, empty } from '../controls.js';
@@ -43,7 +44,7 @@ function card(entry) {
   ]);
   open.addEventListener('click', () => { if (!current) hooks.openProject?.(entry.id); });
 
-  const remove = el('button.icon-btn.is-danger.proj-delete', {
+  const remove = el('button.icon-btn.is-danger', {
     type: 'button', title: `Delete “${entry.name}”`, 'aria-label': `Delete ${entry.name}`,
   }, [uiIcon('trash', 15)]);
   remove.addEventListener('click', () => {
@@ -52,9 +53,56 @@ function card(entry) {
     render();
   });
 
-  const node = el('div.proj-card', {}, [open, remove]);
+  const rename = el('button.icon-btn', {
+    type: 'button', title: `Rename “${entry.name}”`, 'aria-label': `Rename ${entry.name}`,
+    html: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></svg>',
+  });
+  rename.addEventListener('click', () => startRename(node, entry));
+
+  const node = el('div.proj-card', {}, [open, el('div.proj-actions', {}, [rename, remove])]);
   node.classList.toggle('is-current', current);
   return node;
+}
+
+/**
+ * Swap the card's name for a field. Enter or leaving the field saves; Esc
+ * puts the old name back.
+ */
+function startRename(node, entry) {
+  const openBtn = node.querySelector('button.proj-open');
+  if (!openBtn || node.querySelector('.proj-rename')) return;
+  const input = el('input.field.proj-rename', {
+    type: 'text', value: entry.name || 'Untitled map', 'aria-label': 'Project name', maxlength: '120',
+  });
+  let done = false;
+  const finish = (save) => {
+    if (done) return;
+    done = true;
+    const next = input.value.trim();
+    if (save && next && next !== entry.name) {
+      const result = renameProject(entry.id, next);
+      if (!result.ok) notify.warn(result.error ?? 'That name could not be saved.');
+      else if (entry.id === state.projectId) {
+        const header = $('#project-name');
+        if (header) header.value = next;
+      }
+    }
+    render();
+  };
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+    else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); finish(false); }
+  });
+  input.addEventListener('blur', () => finish(true));
+  // The card's open button is swapped for a plain row while renaming: a field
+  // inside a button would hand Enter and Space to the button and open the map.
+  const editing = el('div.proj-open.is-renaming', {}, [
+    openBtn.querySelector('.proj-thumb')?.cloneNode(true),
+    el('span.proj-text', {}, [input, el('span', { text: 'Enter to save · Esc to cancel' })]),
+  ]);
+  openBtn.replaceWith(editing);
+  input.focus();
+  input.select();
 }
 
 export function render() {
