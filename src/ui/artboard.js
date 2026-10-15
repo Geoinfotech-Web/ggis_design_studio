@@ -10,9 +10,10 @@
 import { $, el } from '../core/dom.js';
 import { state, set, touch, checkpoint, subscribe } from '../core/store.js';
 import { PAPER_SIZES, paperDimsLabel } from '../core/constants.js';
-import { renderElementDom, elementLabel, zoomInsetView, createElement } from '../layout/elements.js';
+import { renderElementDom, elementLabel, zoomInsetView, createElement, mapFrameOf } from '../layout/elements.js';
 import { currentMetresPerPixel } from '../layout/derive.js';
 import { notify } from '../core/toast.js';
+import { paperFill, pageBorderColor, pageStyle } from '../layout/page-style.js';
 import { getMap } from '../core/map.js';
 
 let artboard, layer, label, wrap;
@@ -133,16 +134,200 @@ export function toggleGrid() {
     renderElements();
     return false;
   }
-  // Over the map frame when the page has one; otherwise inset from the page
-  // edge, leaving the margin its labels sit in outside the frame. It goes to
-  // the bottom of the stack, so title bands and panels sit on top.
-  const frame = state.elements.find((e) => e.type === 'neatline');
+  // On the map frame when the page has one — the grid belongs to the map,
+  // not the page — else the neatline; otherwise inset from the page edge,
+  // leaving the margin its labels sit in. It goes to the bottom of the stack,
+  // so title bands and panels sit on top.
+  const frame = mapFrameOf(state.elements) ?? state.elements.find((e) => e.type === 'neatline');
   const box = frame ? { x: frame.x, y: frame.y, w: frame.w, h: frame.h } : { x: 4, y: 4, w: 92, h: 92 };
   checkpoint();
   const elm = createElement('grid', box);
   set({ elements: [elm, ...state.elements], selectedElementId: elm.id, selectedLayerId: null }, { history: false });
   renderElements();
   return true;
+}
+
+/**
+ * Add a map frame, or remove the one there is. A new frame sits a margin
+ * inside the neatline (or the page), so the neatline stays its own, outer
+ * line and there is paper between the two.
+ */
+export function toggleMapFrame() {
+  const existing = state.elements.find((e) => e.type === 'mapframe');
+  if (existing) {
+    removeElement(existing.id);
+    renderElements();
+    return false;
+  }
+  const neat = state.elements.find((e) => e.type === 'neatline');
+  const m = 2.5;
+  const box = neat
+    ? { x: neat.x + m, y: neat.y + m, w: Math.max(10, neat.w - m * 2), h: Math.max(10, neat.h - m * 2) }
+    : { x: 6, y: 6, w: 88, h: 88 };
+  checkpoint();
+  const elm = createElement('mapframe', box);
+  // Bottom of the stack: it is the map's edge, and everything else on the
+  // page — titles, legends, the grid's labels — belongs on top of it.
+  set({ elements: [elm, ...state.elements], selectedElementId: elm.id, selectedLayerId: null }, { history: false });
+  // A grid that was fitted to the neatline now belongs to the map frame.
+  const grid = state.elements.find((e) => e.type === 'grid');
+  if (grid && neat && grid.x === neat.x && grid.y === neat.y && grid.w === neat.w && grid.h === neat.h) {
+    Object.assign(grid, box);
+  }
+  renderElements();
+  return true;
+}
+
+/* ------------------------------------------------------------------ */
+/* drawing a shape: pick it, then drag it out on the page              */
+/* ------------------------------------------------------------------ */
+/*
+ * The way a desktop GIS draws graphics: choose a shape from the gallery, and
+ * the page takes a crosshair. Press where one corner should be and drag to
+ * the other; the shape follows the pointer. Dragging leftwards or upwards
+ * flips it, so a line or an arrow points the way it was drawn. A plain click
+ * drops it at a standard size. Shift keeps it square; Esc puts the tool down.
+ */
+let drawing = null;
+
+export const isDrawingShape = () => Boolean(drawing);
+
+export function cancelShapeDraw() {
+  if (!drawing) return;
+  drawing.overlay.remove();
+  window.removeEventListener('keydown', drawing.onKey, true);
+  drawing = null;
+  set({ drawTool: null }, { history: false });
+}
+
+/**
+ * @param {string} variant  a SHAPES id
+ * @param {{square?: boolean, point?: boolean, label?: string}} [opts]
+ */
+export function startShapeDraw(variant, opts = {}) {
+  cancelShapeDraw();
+  if (!layer) return;
+  setInsetEditing(null);
+  if (state.panMode) setPanMode(false);
+
+  const overlay = el('div.draw-overlay', { title: `Drag to draw: ${opts.label ?? 'shape'}` });
+  const ghost = el('div.draw-ghost');
+  overlay.append(ghost);
+  layer.after(overlay);
+
+  // Page percentages from a pointer event, against the element layer.
+  const toPct = (e) => {
+    const r = layer.getBoundingClientRect();
+    return { x: ((e.clientX - r.left) / r.width) * 100, y: ((e.clientY - r.top) / r.height) * 100, r };
+  };
+  let start = null;
+  let box = null;
+
+  const shape = (a, b, square) => {
+    let dx = b.x - a.x;
+    let dy = b.y - a.y;
+    if (square) {
+      // Square on paper, not in percentages: page width and height differ.
+      const aspect = a.r.width / a.r.height;
+      const side = Math.max(Math.abs(dx), Math.abs(dy) * (1 / aspect));
+      dx = Math.sign(dx || 1) * side;
+      dy = Math.sign(dy || 1) * side * aspect;
+    }
+    return {
+      x: Math.min(a.x, a.x + dx), y: Math.min(a.y, a.y + dy),
+      w: Math.abs(dx), h: Math.abs(dy), flipX: dx < 0, flipY: dy < 0,
+    };
+  };
+  const showGhost = (b) => {
+    Object.assign(ghost.style, { display: 'block', left: `${b.x}%`, top: `${b.y}%`, width: `${b.w}%`, height: `${b.h}%` });
+  };
+
+  overlay.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    // Keeps the drag ours if the pointer leaves the page; not essential.
+    try { overlay.setPointerCapture(e.pointerId); } catch { /* pointer already gone */ }
+    start = toPct(e);
+    box = null;
+  });
+  overlay.addEventListener('pointermove', (e) => {
+    if (!start) return;
+    box = shape(start, toPct(e), opts.square || e.shiftKey);
+    showGhost(box);
+  });
+  overlay.addEventListener('pointerup', (e) => {
+    if (!start) return;
+    const end = toPct(e);
+    const dragged = box && (box.w > 0.6 || box.h > 0.6);
+    let final;
+    if (dragged) {
+      final = shape(start, end, opts.square || e.shiftKey);
+    } else {
+      // A click: a standard size, centred where clicked — square for a point
+      // or a circle.
+      const aspect = start.r.width / start.r.height;
+      const w = opts.point ? 2.4 : 14;
+      const h = opts.point || opts.square ? w * aspect : 10;
+      final = { x: start.x - w / 2, y: start.y - h / 2, w, h, flipX: false, flipY: false };
+    }
+    start = null;
+    finishShape(variant, final, opts);
+  });
+
+  const onKey = (e) => {
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cancelShapeDraw(); }
+  };
+  window.addEventListener('keydown', onKey, true);
+  drawing = { overlay, onKey, variant };
+  set({ drawTool: variant }, { history: false });
+  hint(`<b>Drag on the page</b> to draw the ${(opts.label ?? 'shape').toLowerCase()} — from one corner to the other. Click for a standard size; hold <b>Shift</b> to keep it square; <b>Esc</b> to cancel.`, 6000);
+}
+
+function finishShape(variant, box, opts) {
+  const { flipX, flipY, ...rect } = box;
+  const elm = createElement('shape', {
+    x: Number(rect.x.toFixed(2)), y: Number(rect.y.toFixed(2)),
+    w: Number(Math.max(0.4, rect.w).toFixed(2)), h: Number(Math.max(0.4, rect.h).toFixed(2)),
+    style: { ...(opts.defaults ?? {}), variant, flipX, flipY },
+  });
+  cancelShapeDraw();
+  addElement(elm);
+  renderElements();
+}
+
+/* ------------------------------------------------------------------ */
+/* paper outside the map frame                                         */
+/* ------------------------------------------------------------------ */
+/*
+ * One layer under the elements, painted the page colour, with the map frame
+ * cut out of it (an even-odd clip: the page, minus the frame). So the map
+ * shows only through the frame and the rest of the page is paper — on screen
+ * exactly as the exporter paints it.
+ */
+let paper = null;
+let pageBorder = null;
+
+/** The border round the sheet, over everything else on the page. */
+function updatePageBorder() {
+  if (!pageBorder) return;
+  const color = pageBorderColor(state.page);
+  if (!color) { pageBorder.style.display = 'none'; return; }
+  const w = Math.max(0.5, unit()(pageStyle(state.page).borderWidth));
+  pageBorder.style.display = '';
+  pageBorder.style.border = `${w.toFixed(2)}px solid ${color}`;
+}
+
+function updatePaper(box = null) {
+  updatePageBorder();
+  if (!paper) return;
+  const frame = box ?? mapFrameOf(state.elements);
+  if (!frame) { paper.style.display = 'none'; return; }
+  const x1 = frame.x; const y1 = frame.y;
+  const x2 = frame.x + frame.w; const y2 = frame.y + frame.h;
+  paper.style.display = '';
+  paper.style.background = paperFill(state.page);
+  paper.style.clipPath = `polygon(evenodd, 0% 0%, 100% 0%, 100% 100%, 0% 100%, 0% 0%, ${x1}% ${y1}%, ${x2}% ${y1}%, ${x2}% ${y2}%, ${x1}% ${y2}%, ${x1}% ${y1}%)`;
 }
 
 /* ------------------------------------------------------------------ */
@@ -290,7 +475,7 @@ function initLayoutView() {
  */
 // The grid too: it usually covers the whole map frame, and the map under it
 // must still pan and zoom.
-const FRAME_TYPES = new Set(['neatline', 'grid']);
+const FRAME_TYPES = new Set(['neatline', 'grid', 'mapframe']);
 const EDGES = ['top', 'right', 'bottom', 'left'];
 
 function buildNode(elm) {
@@ -415,6 +600,7 @@ export function renderElements() {
   for (const [id, node] of nodes) {
     if (!seen.has(id)) { node.remove(); nodes.delete(id); }
   }
+  updatePaper();
 }
 
 /* ------------------------------------------------------------------ */
@@ -562,6 +748,8 @@ function onPointerMove(event) {
 
   dragging.box = box;
   positionNode(dragging.node, box);
+  // The paper follows a map frame as it is dragged or resized.
+  if (dragging.node.dataset.type === 'mapframe') updatePaper(box);
 }
 
 function onPointerUp() {
@@ -642,6 +830,16 @@ export function initArtboard() {
   label = $('#artboard-label');
   wrap = $('#canvas-wrap');
   if (!artboard) return;
+
+  // The paper layer goes under the elements, inside the page.
+  paper = el('div.page-paper', { 'aria-hidden': 'true' });
+  paper.style.display = 'none';
+  layer?.before(paper);
+  // And the page border after them, so it frames everything.
+  pageBorder = el('div.page-border', { 'aria-hidden': 'true' });
+  pageBorder.style.display = 'none';
+  layer?.after(pageBorder);
+  subscribe(['page'], () => updatePaper());
 
   // Click on empty canvas clears the selection.
   wrap.addEventListener('pointerdown', (event) => {

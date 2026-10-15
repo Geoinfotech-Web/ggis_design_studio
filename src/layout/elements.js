@@ -14,6 +14,8 @@
  */
 
 import { FONTS, BASEMAPS } from '../core/constants.js';
+import { withOpacity } from './page-style.js';
+import { SHAPES, SHAPE_GROUPS, shapeSvgPx, paintShapePx } from './shapes.js';
 import { uid, esc } from '../core/dom.js';
 import { state } from '../core/store.js';
 import { bboxOf } from '../core/geo.js';
@@ -255,106 +257,10 @@ function paintNorthGlyph(c, variant, color, cx, cy, side, rotation) {
 }
 
 /* ------------------------------------------------------------------ */
-/* shapes — one geometry description, two renderers                    */
+/* shapes — the gallery, its geometry and both renderers: ./shapes.js   */
 /* ------------------------------------------------------------------ */
-export const SHAPE_VARIANTS = [
-  { id: 'rectangle', label: 'Rectangle' },
-  { id: 'ellipse',   label: 'Ellipse' },
-  { id: 'triangle',  label: 'Triangle' },
-  { id: 'diamond',   label: 'Diamond' },
-  { id: 'star',      label: 'Star' },
-  { id: 'line',      label: 'Line' },
-  { id: 'arrow',     label: 'Arrow' },
-];
-
-/** Points on a 0–100 grid, or null for shapes drawn with their own path. */
-function shapePoints(variant) {
-  switch (variant) {
-    case 'triangle': return [[50, 2], [98, 98], [2, 98]];
-    case 'diamond':  return [[50, 2], [98, 50], [50, 98], [2, 50]];
-    case 'star': {
-      const pts = [];
-      for (let i = 0; i < 10; i++) {
-        const r = i % 2 ? 21 : 49;
-        const a = (Math.PI / 5) * i - Math.PI / 2;
-        pts.push([50 + Math.cos(a) * r * 2, 50 + Math.sin(a) * r * 2]);
-      }
-      return pts;
-    }
-    case 'arrow': return [[2, 36], [64, 36], [64, 14], [98, 50], [64, 86], [64, 64], [2, 64]];
-    case 'line':  return [[2, 50], [98, 50]];
-    default: return null;
-  }
-}
-
-const DASH_ARRAY = { solid: '', dashed: '6 4', dotted: '1.5 4' };
-
-function shapeSvg(s, u) {
-  const stroke = Math.max(0, u(s.strokeWidth ?? 0));
-  const fill = (s.fillOpacity ?? 0) > 0 ? rgba(s.fill, s.fillOpacity) : 'none';
-  const dash = DASH_ARRAY[s.dash] ?? '';
-  const common = `fill="${fill}" stroke="${s.stroke}" stroke-width="${stroke}" vector-effect="non-scaling-stroke" stroke-linejoin="round" stroke-linecap="round"${dash ? ` stroke-dasharray="${dash}"` : ''}`;
-
-  let body;
-  if (s.variant === 'ellipse') {
-    body = `<ellipse cx="50" cy="50" rx="48" ry="48" ${common}/>`;
-  } else if (s.variant === 'rectangle' || !s.variant) {
-    const r = Math.max(0, Math.min(40, s.radius ?? 0));
-    body = `<rect x="2" y="2" width="96" height="96" rx="${r}" ${common}/>`;
-  } else if (s.variant === 'line') {
-    body = `<line x1="2" y1="50" x2="98" y2="50" fill="none" stroke="${s.stroke}" stroke-width="${stroke}" vector-effect="non-scaling-stroke" stroke-linecap="round"${dash ? ` stroke-dasharray="${dash}"` : ''}/>`;
-  } else {
-    const pts = shapePoints(s.variant) ?? [];
-    body = `<polygon points="${pts.map(([x, y]) => `${x},${y}`).join(' ')}" ${common}/>`;
-  }
-
-  const spin = s.rotation ? ` transform="rotate(${s.rotation} 50 50)"` : '';
-  return `<svg viewBox="0 0 100 100" preserveAspectRatio="none" style="width:100%;height:100%;display:block;overflow:visible"><g${spin}>${body}</g></svg>`;
-}
-
-function paintShape(c, s, box, u) {
-  const stroke = Math.max(0, u(s.strokeWidth ?? 0));
-  const hasFill = (s.fillOpacity ?? 0) > 0;
-
-  c.save();
-  c.translate(box.x + box.w / 2, box.y + box.h / 2);
-  if (s.rotation) c.rotate((s.rotation * Math.PI) / 180);
-  c.translate(-box.w / 2, -box.h / 2);
-
-  const sx = box.w / 100;
-  const sy = box.h / 100;
-  const at = (x, y) => [x * sx, y * sy];
-
-  c.beginPath();
-  if (s.variant === 'ellipse') {
-    c.ellipse(box.w / 2, box.h / 2, (box.w / 2) * 0.96, (box.h / 2) * 0.96, 0, 0, Math.PI * 2);
-  } else if (s.variant === 'rectangle' || !s.variant) {
-    const r = Math.min((s.radius ?? 0) * sx, box.w / 2, box.h / 2);
-    roundRect(c, 2 * sx, 2 * sy, 96 * sx, 96 * sy, r);
-  } else {
-    const pts = shapePoints(s.variant) ?? [];
-    pts.forEach(([x, y], i) => {
-      const [px, py] = at(x, y);
-      if (i) c.lineTo(px, py); else c.moveTo(px, py);
-    });
-    if (s.variant !== 'line') c.closePath();
-  }
-
-  if (hasFill && s.variant !== 'line') {
-    c.fillStyle = rgba(s.fill, s.fillOpacity);
-    c.fill();
-  }
-  if (stroke > 0) {
-    c.lineWidth = stroke;
-    c.strokeStyle = s.stroke;
-    c.lineJoin = 'round';
-    c.lineCap = 'round';
-    if (s.dash === 'dashed') c.setLineDash([stroke * 3, stroke * 2]);
-    else if (s.dash === 'dotted') c.setLineDash([stroke * 0.8, stroke * 2.2]);
-    c.stroke();
-  }
-  c.restore();
-}
+/** The shape picker list, grouped as the gallery groups them. */
+export const SHAPE_VARIANTS = SHAPE_GROUPS.flatMap((g) => g.items.map((id) => ({ id, label: SHAPES[id].label, group: g.id })));
 
 /* ------------------------------------------------------------------ */
 /* locator inset — project a study area into a small box               */
@@ -617,28 +523,50 @@ function gridPlan(elm) {
  * width. Inside keeps everything within the frame, for a full-bleed page
  * with no margin to put labels in.
  *
+ * The left and right labels can each be turned (`vertical`, reading
+ * upwards) or level (`horizontal`), whichever side of the frame they are on.
+ * Unset, they follow the convention for the position: turned outside, where
+ * the margin is narrow, and level inside.
+ *
  * `rotate` is in degrees about (x, y).
+ *
+ * @param {{left?: 'vertical'|'horizontal', right?: 'vertical'|'horizontal'}} [orient]
  */
-function gridLabelPlacement(lb, W, H, fs, outside = true) {
+export function gridLabelPlacement(lb, W, H, fs, outside = true, orient = {}) {
   const pad = fs * 0.4;
-  if (outside) {
-    switch (lb.edge) {
-      case 'top': return { x: lb.u * W, y: -pad, anchor: 'middle', baseline: 'auto', rotate: 0 };
-      case 'bottom': return { x: lb.u * W, y: H + pad, anchor: 'middle', baseline: 'hanging', rotate: 0 };
-      // Turned -90°: "above the baseline" now points left, away from the frame.
-      case 'left': return { x: -pad, y: lb.v * H, anchor: 'middle', baseline: 'auto', rotate: -90 };
-      // Same turn; hanging below the baseline points right, away from the frame.
-      default: return { x: W + pad, y: lb.v * H, anchor: 'middle', baseline: 'hanging', rotate: -90 };
-    }
-  }
+  const fallback = outside ? 'vertical' : 'horizontal';
+  const vertical = (lb.edge === 'left' ? orient.left : orient.right) ?? fallback;
   const clampX = (x) => Math.max(fs * 2.2, Math.min(W - fs * 2.2, x));
   const clampY = (y) => Math.max(fs, Math.min(H - fs, y));
-  switch (lb.edge) {
-    case 'top': return { x: clampX(lb.u * W), y: pad, anchor: 'middle', baseline: 'hanging', rotate: 0 };
-    case 'bottom': return { x: clampX(lb.u * W), y: H - pad, anchor: 'middle', baseline: 'auto', rotate: 0 };
-    case 'left': return { x: pad, y: clampY(lb.v * H), anchor: 'start', baseline: 'middle', rotate: 0 };
-    default: return { x: W - pad, y: clampY(lb.v * H), anchor: 'end', baseline: 'middle', rotate: 0 };
+
+  if (lb.edge === 'top') {
+    return outside
+      ? { x: lb.u * W, y: -pad, anchor: 'middle', baseline: 'auto', rotate: 0 }
+      : { x: clampX(lb.u * W), y: pad, anchor: 'middle', baseline: 'hanging', rotate: 0 };
   }
+  if (lb.edge === 'bottom') {
+    return outside
+      ? { x: lb.u * W, y: H + pad, anchor: 'middle', baseline: 'hanging', rotate: 0 }
+      : { x: clampX(lb.u * W), y: H - pad, anchor: 'middle', baseline: 'auto', rotate: 0 };
+  }
+
+  const left = lb.edge === 'left';
+  if (vertical === 'vertical') {
+    // Turned -90°: text "above" its baseline points left, "below" points
+    // right. Pick whichever puts it on the wanted side of the frame line.
+    const towardLeft = left === outside;          // outside-left or inside-right
+    const x = left ? (outside ? -pad : pad) : (outside ? W + pad : W - pad);
+    return { x, y: outside ? lb.v * H : clampY(lb.v * H), anchor: 'middle', baseline: towardLeft ? 'auto' : 'hanging', rotate: -90 };
+  }
+  // Level: anchored at the end nearest the frame line.
+  if (outside) {
+    return left
+      ? { x: -pad, y: lb.v * H, anchor: 'end', baseline: 'middle', rotate: 0 }
+      : { x: W + pad, y: lb.v * H, anchor: 'start', baseline: 'middle', rotate: 0 };
+  }
+  return left
+    ? { x: pad, y: clampY(lb.v * H), anchor: 'start', baseline: 'middle', rotate: 0 }
+    : { x: W - pad, y: clampY(lb.v * H), anchor: 'end', baseline: 'middle', rotate: 0 };
 }
 
 /** The inset's outlines on a canvas: surrounding region, study area, view box. */
@@ -1151,6 +1079,35 @@ export const ELEMENT_TYPES = {
     },
   },
 
+  mapframe: {
+    label: 'Map frame', icon: '▣', hint: 'The window the map shows through — paper outside it',
+    inspect: ['mapframe'],
+    defaults: { x: 6, y: 6, w: 88, h: 88 },
+    // Only a border is drawn here. The paper outside the frame is painted by
+    // the artboard on screen and by the exporter, beneath every element.
+    style: { ...PLAIN, color: '#0f172a', borderWidth: 1.2, borderOpacity: 1 },
+    dom(inner, elm, ctx) {
+      const s = elm.style;
+      inner.style.position = 'absolute';
+      inner.style.inset = '0';
+      inner.style.boxSizing = 'border-box';
+      inner.style.border = (s.borderWidth ?? 0) > 0
+        ? `${Math.max(0.5, ctx.u(s.borderWidth))}px solid ${withOpacity(s.color, s.borderOpacity ?? 1)}`
+        : '0';
+    },
+    paint(c, elm, box, ctx) {
+      const s = elm.style;
+      if (!((s.borderWidth ?? 0) > 0)) return;
+      const lw = Math.max(0.5, ctx.u(s.borderWidth));
+      c.save();
+      c.strokeStyle = withOpacity(s.color, s.borderOpacity ?? 1);
+      c.lineWidth = lw;
+      // Inside the box, as the screen's border-box draws it.
+      c.strokeRect(box.x + lw / 2, box.y + lw / 2, box.w - lw, box.h - lw);
+      c.restore();
+    },
+  },
+
   grid: {
     label: 'Grid & labels', icon: '#', hint: 'Latitude/longitude lines with coordinate labels at the edges',
     inspect: ['grid', 'type'],
@@ -1178,7 +1135,7 @@ export const ELEMENT_TYPES = {
       const family = esc(FONTS[s.font]?.stack ?? FONTS.sans.stack);
       const outside = s.labelPosition !== 'inside';
       const labels = s.showLabels === false ? '' : plan.labels.map((lb) => {
-        const p = gridLabelPlacement(lb, W, H, fs, outside);
+        const p = gridLabelPlacement(lb, W, H, fs, outside, { left: s.leftOrient, right: s.rightOrient });
         const halo = s.halo ? `paint-order="stroke" stroke="#ffffff" stroke-width="${(fs * 0.28).toFixed(2)}" stroke-linejoin="round"` : '';
         const turn = p.rotate ? `transform="rotate(${p.rotate} ${p.x.toFixed(2)} ${p.y.toFixed(2)})"` : '';
         return `<text x="${p.x.toFixed(2)}" y="${p.y.toFixed(2)}" ${turn} text-anchor="${p.anchor}" dominant-baseline="${p.baseline}" font-size="${fs.toFixed(2)}" font-weight="${s.weight ?? 600}" font-family="${family}" fill="${s.color}" ${halo}>${esc(lb.text)}</text>`;
@@ -1216,7 +1173,7 @@ export const ELEMENT_TYPES = {
         const fs = u(s.size);
         c.font = `${s.italic ? 'italic ' : ''}${s.weight ?? 600} ${fs}px ${FONTS[s.font]?.stack ?? FONTS.sans.stack}`;
         for (const lb of plan.labels) {
-          const p = gridLabelPlacement(lb, box.w, box.h, fs, outside);
+          const p = gridLabelPlacement(lb, box.w, box.h, fs, outside, { left: s.leftOrient, right: s.rightOrient });
           c.save();
           c.translate(box.x + p.x, box.y + p.y);
           if (p.rotate) c.rotate((p.rotate * Math.PI) / 180);
@@ -1320,7 +1277,7 @@ export const ELEMENT_TYPES = {
   },
 
   shape: {
-    label: 'Shape', icon: '◇', hint: 'Rectangle, circle, line, arrow or star',
+    label: 'Shape', icon: '◇', hint: 'Lines, a point, polygons and arrows — pick one, then drag it out on the page',
     inspect: ['shape'],
     defaults: { x: 40, y: 45, w: 16, h: 12 },
     style: {
@@ -1331,10 +1288,15 @@ export const ELEMENT_TYPES = {
       radius: 2, rotation: 0, dash: 'solid',
     },
     dom(inner, elm, ctx) {
-      inner.innerHTML = shapeSvg(elm.style, ctx.u);
+      // Built in real pixels, so strokes and arrowheads keep their shape however
+      // the box is stretched; the export builds from the same geometry.
+      const box = boxOfNode(inner);
+      if (!box) { inner.innerHTML = ''; return; }
+      inner.style.overflow = 'visible';
+      inner.innerHTML = shapeSvgPx(elm.style, box.w, box.h, Math.max(0, ctx.u(elm.style.strokeWidth ?? 0)), rgba);
     },
     paint(c, elm, box, ctx) {
-      paintShape(c, elm.style, box, ctx.u);
+      paintShapePx(c, elm.style, box, Math.max(0, ctx.u(elm.style.strokeWidth ?? 0)), rgba);
     },
   },
 
@@ -1370,7 +1332,7 @@ export const ELEMENT_TYPES = {
 /** Order shown in the "Add element" panel. */
 export const ELEMENT_ORDER = [
   'title', 'subtitle', 'text', 'legend', 'stats', 'metadata',
-  'north', 'scale', 'inset', 'shape', 'logo', 'neatline', 'grid', 'credits',
+  'north', 'scale', 'inset', 'shape', 'logo', 'mapframe', 'neatline', 'grid', 'credits',
 ];
 
 /* ------------------------------------------------------------------ */
@@ -1406,9 +1368,18 @@ export function renderElementDom(inner, elm, ctx) {
   if (!def) return;
   inner.replaceChildren();
   inner.removeAttribute('style');
-  if (elm.type !== 'neatline') chromeDom(inner, elm.style, ctx.u);
+  if (!BORDER_ONLY.has(elm.type)) chromeDom(inner, elm.style, ctx.u);
   def.dom(inner, elm, ctx);
 }
+
+/** Elements that are nothing but a border: no card, no padding. */
+const BORDER_ONLY = new Set(['neatline', 'mapframe']);
+
+/**
+ * The map frame, if the page has one: the rectangle the map shows through.
+ * Everything outside it is paper.
+ */
+export const mapFrameOf = (elements) => elements.find((e) => e.type === 'mapframe' && !e.hidden) ?? null;
 
 /**
  * Draw an element into the export canvas.
@@ -1421,7 +1392,7 @@ export function paintElement(c, elm, box, ctx) {
   const def = ELEMENT_TYPES[elm.type];
   if (!def) return;
   c.save();
-  if (elm.type === 'neatline') {
+  if (BORDER_ONLY.has(elm.type)) {
     def.paint(c, elm, box, ctx);
   } else {
     paintChrome(c, box, elm.style, ctx.u);
