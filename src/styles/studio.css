@@ -456,6 +456,31 @@ kbd {
   font-size: 10.5px; font-weight: 700; color: var(--accent-deep); pointer-events: none;
 }
 .element-layer { position: absolute; inset: 0; pointer-events: none; }
+/* Paper outside the map frame. It takes the pointer, so the map cannot be
+   dragged from the margin — only through the frame, as it will print. */
+.page-paper { position: absolute; inset: 0; pointer-events: auto; }
+.page-border { position: absolute; inset: 0; box-sizing: border-box; pointer-events: none; }
+
+/* Drawing a shape: the page takes a crosshair, above every element */
+.draw-overlay { position: absolute; inset: 0; z-index: 9000; pointer-events: auto; cursor: crosshair; touch-action: none; }
+.draw-ghost {
+  display: none; position: absolute; box-sizing: border-box; pointer-events: none;
+  border: 1.5px dashed var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+/* Shape gallery in the Elements panel */
+.shape-gallery { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+.shape-gallery-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.shape-gallery-head strong { font-size: 12px; }
+.shape-group-title { font-size: 11.5px; font-weight: 700; color: var(--ink); margin-bottom: 5px; }
+.shape-group-items { display: grid; grid-template-columns: repeat(5, 34px); gap: 4px; }
+.shape-tool {
+  display: grid; place-items: center; width: 34px; height: 34px; padding: 0; border-radius: 7px;
+  border: 1px solid transparent; background: transparent; color: var(--leaf, #16a34a); cursor: pointer;
+}
+.shape-tool:hover { background: var(--line-soft); border-color: var(--line); }
+.shape-tool.is-active { background: var(--accent-wash); border-color: var(--accent); color: var(--accent-deep); }
+.shape-tool:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 1px; }
 
 /* Element instances */
 .el {
@@ -798,6 +823,11 @@ input[type='range'] { width: 100%; accent-color: var(--accent); }
 
 /* Row editor for generated blocks (Map information, Key figures) */
 .row-edit-note { margin: 0; font-size: 10.5px; line-height: 1.4; color: var(--ink-faint); }
+
+/* Grid label edges: two columns — top | bottom, then left | right */
+.grid-edges { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 10px; }
+.grid-edge-cell { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.grid-edge-cell .seg-btn { padding: 4px 3px; font-size: 10.5px; }
 .row-edit-head, .row-edit { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.3fr) 26px; gap: 5px; align-items: center; }
 .row-edit-head span { font-size: 10px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--ink-faint); }
 .row-edit .field { height: 28px; font-size: 11.5px; padding: 0 7px; }
