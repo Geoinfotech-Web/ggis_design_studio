@@ -66,6 +66,7 @@ export const SHORTCUT_GROUPS = [
     title: 'Map tools',
     items: [
       { keys: ['B'], label: 'Basemap gallery', match: letter('b'), run: call('toggleBasemap') },
+      { keys: ['M'], label: 'Map frame on / off — the map shows only inside it, paper outside', match: letter('m'), run: call('toggleMapFrame') },
       { keys: ['G'], label: 'Grid lines & coordinate labels on / off', match: letter('g'), run: call('toggleGrid') },
       { keys: ['V'], label: 'View tools menu', match: letter('v'), run: call('toggleView') },
       { keys: ['D'], label: 'Coordinates in decimal degrees / degrees-minutes-seconds', match: letter('d'), run: call('toggleCoordFormat') },

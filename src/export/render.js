@@ -13,7 +13,8 @@ import { state } from '../core/store.js';
 import { getMap, lookFilter, maplibregl } from '../core/map.js';
 import { APP, effectiveDpi } from '../core/constants.js';
 import { buildRenderContext } from '../layout/derive.js';
-import { paintElement, preloadElementAssets, preloadInsetTiles, contentBox } from '../layout/elements.js';
+import { paintElement, preloadElementAssets, preloadInsetTiles, contentBox, mapFrameOf } from '../layout/elements.js';
+import { paperFill, pageBorderColor, pageStyle } from '../layout/page-style.js';
 import { paperDims, artboardRect, layoutViewSnapshot, fitLayout, restoreLayoutView } from '../ui/artboard.js';
 
 /** Wait for the map to finish drawing, but never hang the export. */
@@ -339,6 +340,19 @@ async function composeExportFitted(opts) {
     paintTexture(c, state.mapLook.texture, W, H, Math.max(1, W / 1400));
   }
 
+  // With a map frame, the map shows only through it: everything else on the
+  // page is paper, painted before the elements so they all sit on top.
+  const frame = mapFrameOf(state.elements);
+  if (frame) {
+    c.save();
+    c.beginPath();
+    c.rect(0, 0, W, H);
+    c.rect((frame.x / 100) * W, (frame.y / 100) * H, (frame.w / 100) * W, (frame.h / 100) * H);
+    c.fillStyle = paperFill(state.page);
+    c.fill('evenodd');
+    c.restore();
+  }
+
   /* --- elements ---------------------------------------------------- */
   opts.onProgress?.('Drawing map elements…');
   const ctx = buildRenderContext({ W, H, artWScreen: rect.w || W, media: 'export' });
@@ -365,6 +379,18 @@ async function composeExportFitted(opts) {
     } catch (err) {
       console.error(`[export] element "${elm.type}" failed to draw`, err);
     }
+  }
+
+  // The page border last, so it frames everything on the sheet — drawn just
+  // inside the edge, the way the screen's border-box draws it.
+  const borderColor = pageBorderColor(state.page);
+  if (borderColor) {
+    const lw = Math.max(0.5, ctx.u(pageStyle(state.page).borderWidth));
+    c.save();
+    c.strokeStyle = borderColor;
+    c.lineWidth = lw;
+    c.strokeRect(lw / 2, lw / 2, W - lw, H - lw);
+    c.restore();
   }
 
   return canvas;

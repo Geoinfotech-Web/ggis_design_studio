@@ -15,7 +15,11 @@ import { notify } from '../../core/toast.js';
 import { ELEMENT_TYPES, ELEMENT_ORDER, createElement, elementLabel } from '../../layout/elements.js';
 import { elementIcon } from '../../layout/element-icons.js';
 import { alignElements, distributeElements, matchSize } from '../../layout/align.js';
-import { addElement, removeElement, reorderElement, duplicateElement, selectElement, renderElements } from '../artboard.js';
+import {
+  addElement, removeElement, reorderElement, duplicateElement, selectElement, renderElements,
+  startShapeDraw, cancelShapeDraw,
+} from '../artboard.js';
+import { SHAPES, SHAPE_GROUPS, shapeDefaults, shapeIconSvg } from '../../layout/shapes.js';
 import { head, section, row, empty, miniBtn, seg, button, stack, inline } from '../controls.js';
 import { uiIcon } from '../ui-icons.js';
 
@@ -46,22 +50,69 @@ function place(type) {
   renderElements();
 }
 
+/** Whether the shape gallery is unfolded under the Add grid. */
+let galleryOpen = false;
+
 function addGrid() {
   const grid = el('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' } });
   for (const type of ELEMENT_ORDER) {
     const def = ELEMENT_TYPES[type];
+    const isShape = type === 'shape';
     const btn = el('button.row', {
       type: 'button',
-      title: def.hint,
-      style: { border: '1px solid var(--line)' },
+      title: isShape ? 'Choose a shape, then drag it out on the page' : def.hint,
+      'aria-expanded': isShape ? String(galleryOpen) : null,
+      style: { border: `1px solid ${isShape && galleryOpen ? 'var(--accent)' : 'var(--line)'}` },
     }, [
       el('span.row-ico', {}, [elementIcon(type)]),
-      el('span.row-main', {}, [el('span.row-title', { text: def.label, style: { display: 'block' } })]),
+      el('span.row-main', {}, [el('span.row-title', { text: isShape ? 'Shape…' : def.label, style: { display: 'block' } })]),
     ]);
-    btn.addEventListener('click', () => place(type));
+    // Shape opens the gallery instead of dropping a rectangle in the middle.
+    btn.addEventListener('click', () => {
+      if (isShape) { galleryOpen = !galleryOpen; if (!galleryOpen) cancelShapeDraw(); render(); return; }
+      place(type);
+    });
     grid.append(btn);
   }
-  return grid;
+  return galleryOpen ? stack([grid, shapeGallery()], '0') : grid;
+}
+
+/**
+ * The graphics palette: lines, a point, polygons, arrows. Choosing one puts
+ * the page into drawing mode; the shape is then dragged out where it should
+ * go, at the size it should be.
+ */
+function shapeGallery() {
+  const active = state.drawTool ?? null;
+  const groups = SHAPE_GROUPS.map((g) => el('div', {}, [
+    el('div.shape-group-title', { text: g.id }),
+    el('div.shape-group-items', {}, g.items.map((id) => {
+      const spec = SHAPES[id];
+      const btn = el('button.shape-tool', {
+        type: 'button', title: `${spec.label} — then drag it out on the page`, 'aria-label': spec.label,
+        'aria-pressed': String(active === id), html: shapeIconSvg(id, 22),
+      });
+      btn.classList.toggle('is-active', active === id);
+      btn.addEventListener('click', () => {
+        if (active === id) { cancelShapeDraw(); return; }
+        startShapeDraw(id, {
+          label: spec.label,
+          square: Boolean(spec.square),
+          point: spec.kind === 'point',
+          defaults: shapeDefaults(id),
+        });
+      });
+      return btn;
+    })),
+  ]));
+  const close = button('Done', () => { galleryOpen = false; cancelShapeDraw(); render(); }, 'ghost');
+  return el('div.shape-gallery', {}, [
+    el('div.shape-gallery-head', {}, [
+      el('strong', { text: active ? `Drawing: ${SHAPES[active]?.label} — drag on the page` : 'Choose a shape' }),
+      close,
+    ]),
+    ...groups,
+  ]);
 }
 
 /* ------------------------------------------------------------------ */
@@ -219,7 +270,9 @@ export function render() {
 export function initElementsPane() {
   pane = $('#pane-elements');
   render();
-  subscribe(['elements', 'selectedElementId'], () => { if (state.activeTool === 'elements') render(); });
+  subscribe(['elements', 'selectedElementId', 'drawTool'], () => { if (state.activeTool === 'elements') render(); });
+  // Leaving the panel puts the drawing tool down.
+  subscribe(['activeTool'], () => { if (state.activeTool !== 'elements') cancelShapeDraw(); });
 }
 
 export { render as renderElementsPane };

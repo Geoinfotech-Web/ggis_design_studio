@@ -22,7 +22,7 @@ import { currentUser, initials } from '../core/auth.js';
 import { uiIcon } from './ui-icons.js';
 import {
   renderElements, layoutArtboard, paperDims, setPanMode, hint,
-  isLayoutLocked, setLayoutLocked, zoomLayout, panLayout, fitLayout, layoutZoom, toggleGrid,
+  isLayoutLocked, setLayoutLocked, zoomLayout, panLayout, fitLayout, layoutZoom, toggleGrid, toggleMapFrame,
 } from './artboard.js';
 
 /* ------------------------------------------------------------------ */
@@ -216,9 +216,20 @@ const TB_ICONS = {
   unlock: '<rect x="5" y="10.5" width="14" height="10" rx="2"/><path d="M8 10.5V7.5a4 4 0 0 1 7.6-1.7"/>',
   fitPage: '<rect x="6" y="3.5" width="12" height="17" rx="1.5"/><path d="M9 8h6M9 11h6M9 14h3"/>',
   grid: '<rect x="3.5" y="3.5" width="17" height="17" rx="1.5"/><path d="M9.2 3.5v17M14.8 3.5v17M3.5 9.2h17M3.5 14.8h17"/>',
+  mapframe: '<rect x="2.5" y="2.5" width="19" height="19" rx="1.5"/><rect x="6" y="6" width="12" height="10" rx="0.5"/><path d="M7.5 13.5l2.8-3 2.2 2 1.6-1.4 2.4 2.4"/>',
 };
 
 const hasGrid = () => state.elements.some((e) => e.type === 'grid');
+const hasMapFrame = () => state.elements.some((e) => e.type === 'mapframe');
+
+/** Map frame on or off — the toolbar button and the M key. */
+function toggleMapFrameTool() {
+  if (!state.mapStarted) { notify.info('Start your map first — the frame is drawn on the page.', { duration: 3600 }); return; }
+  setFlyout(null);
+  const on = toggleMapFrame();
+  renderMapControls();
+  if (on) hint('<b>Map frame on</b> — the map now shows only inside it. Drag its edge to move it, a corner to resize. Press <b>M</b> to remove it.', 5600);
+}
 
 /** Grid lines and labels on or off — the toolbar button and the G key. */
 function toggleGridLines() {
@@ -406,11 +417,15 @@ function renderMapControls() {
   const gridOn = hasGrid();
   const gridBtn = tbButton('grid', gridOn ? 'Grid & labels — on (click to remove)' : 'Grid & labels', ['G'], toggleGridLines, { pressed: gridOn });
   gridBtn.classList.toggle('is-on', gridOn);
+  const frameOn = hasMapFrame();
+  const frameBtn = tbButton('mapframe', frameOn ? 'Map frame — on (click to remove)' : 'Map frame', ['M'], toggleMapFrameTool, { pressed: frameOn });
+  frameBtn.classList.toggle('is-on', frameOn);
 
   fill(host, [
     el('div.map-toolbar', { role: 'toolbar', 'aria-label': 'Map tools', 'aria-orientation': 'vertical' }, [
       slot('basemap', basemapBtn, basemapFlyout()),
       slot('view', viewBtn, viewFlyout()),
+      frameBtn,
       gridBtn,
       lockBtn,
     ]),
@@ -643,6 +658,7 @@ export function initChrome({ onHome, onSignOut }) {
     toggleLayoutLock,
     fitPage: () => fitLayout(),
     toggleGrid: toggleGridLines,
+    toggleMapFrame: toggleMapFrameTool,
   });
   renderRail();
   showPane();
@@ -660,8 +676,13 @@ export function initChrome({ onHome, onSignOut }) {
   // The grid button shows whether a grid is on the page, which changes when
   // one is added or deleted from anywhere — but only rebuild when it does.
   let lastGrid = hasGrid();
+  let lastFrame = hasMapFrame();
   subscribe(['elements'], () => {
-    if (hasGrid() !== lastGrid) { lastGrid = hasGrid(); renderMapControls(); }
+    if (hasGrid() !== lastGrid || hasMapFrame() !== lastFrame) {
+      lastGrid = hasGrid();
+      lastFrame = hasMapFrame();
+      renderMapControls();
+    }
   });
   let lastLocked = isLayoutLocked();
   subscribe(['layoutView'], () => {

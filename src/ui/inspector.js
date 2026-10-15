@@ -25,6 +25,8 @@ import { legendEditor, layerLegendRows, iconPicker, dashPicker } from './legend-
 import { numericKeys, propertyKeys } from '../data/upload.js';
 import { CONTEXT_MODES, contextLabel } from '../data/inset-context.js';
 import { creditsText } from '../layout/derive.js';
+import { pageStyle } from '../layout/page-style.js';
+import { shapeKind } from '../layout/shapes.js';
 import { flyToBounds } from '../core/map.js';
 import { boundsFromBbox } from '../core/geo.js';
 import { notify } from '../core/toast.js';
@@ -34,6 +36,7 @@ import {
 } from './controls.js';
 
 let panel;
+let quietPage = false;     // a page-look edit in progress: do not rebuild the panel
 
 /* ================================================================== */
 /* element inspector                                                   */
@@ -160,6 +163,35 @@ function groupRows(elm) {
   ]));
 }
 
+/**
+ * Which edges carry labels, two by two: top and bottom on the first row,
+ * left and right on the second — each side with its own choice of level or
+ * turned text, since a narrow margin on one side may want one and a wide
+ * margin on the other the other.
+ */
+function gridEdges(s, setStyle, after) {
+  const outside = s.labelPosition !== 'inside';
+  const fallback = outside ? 'vertical' : 'horizontal';
+  const orient = (key, on) => (on ? seg(
+    [{ value: 'horizontal', label: 'Horizontal' }, { value: 'vertical', label: 'Vertical' }],
+    s[key] ?? fallback,
+    (value) => after({ [key]: value }),
+  ) : null);
+  const cell = (children) => el('div.grid-edge-cell', {}, children);
+  return el('div.grid-edges', {}, [
+    cell([checkRow('Top', s.labelTop !== false, (on) => setStyle({ labelTop: on }))]),
+    cell([checkRow('Bottom', s.labelBottom !== false, (on) => setStyle({ labelBottom: on }))]),
+    cell([
+      checkRow('Left', s.labelLeft !== false, (on) => after({ labelLeft: on })),
+      orient('leftOrient', s.labelLeft !== false),
+    ]),
+    cell([
+      checkRow('Right', s.labelRight !== false, (on) => after({ labelRight: on })),
+      orient('rightOrient', s.labelRight !== false),
+    ]),
+  ]);
+}
+
 /** Grid lines and coordinate labels: spacing, format, line style, which edges. */
 function groupGrid(elm) {
   const s = elm.style;
@@ -199,13 +231,8 @@ function groupGrid(elm) {
       (value) => after({ labelPosition: value }),
     ), s.labelPosition === 'inside'
       ? 'Inside suits a full-bleed page with no margin.'
-      : 'Side labels turn to read upwards, so they fit a narrow margin.') : null,
-    s.showLabels !== false ? labelled('Label edges', inline([
-      checkRow('Top', s.labelTop !== false, (on) => setStyle({ labelTop: on })),
-      checkRow('Bottom', s.labelBottom !== false, (on) => setStyle({ labelBottom: on })),
-      checkRow('Left', s.labelLeft !== false, (on) => setStyle({ labelLeft: on })),
-      checkRow('Right', s.labelRight !== false, (on) => setStyle({ labelRight: on })),
-    ], '8px')) : null,
+      : 'Outside sits in the page margin, beyond the frame line.') : null,
+    s.showLabels !== false ? labelled('Label edges', gridEdges(s, setStyle, after)) : null,
     s.showLabels !== false ? checkRow('White halo behind labels', Boolean(s.halo), (on) => setStyle({ halo: on }), 'Keeps labels readable over busy imagery.') : null,
     s.showLines !== false ? el('div.panel-title', { text: 'Lines', style: { marginTop: '4px' } }) : null,
     s.showLines !== false ? inspectorRow('Colour', colorInput(s.lineColor ?? '#334155', (value) => setStyle({ lineColor: value }))) : null,
@@ -217,6 +244,55 @@ function groupGrid(elm) {
       (value) => after({ dash: value }),
     )) : null,
     el('p.row-edit-note', { text: 'Label colour and size are under Type below. Drag the grid by its edge to fit it to the map frame.' }),
+  ]));
+}
+
+/**
+ * The page's own look: paper colour and opacity, and a border round the
+ * sheet with its own colour, width and opacity. Shared by the Page setup
+ * panel and the Map frame panel, so both edit the same settings.
+ */
+function pageLookControls() {
+  const p = pageStyle(state.page);
+  // Quietly: a page change normally rebuilds this panel, which would end a
+  // slider drag or close the colour picker being used.
+  const setPage = (patch, { rebuild = false } = {}) => {
+    quietPage = true;
+    try { set({ page: { ...state.page, ...patch } }, { history: false }); } finally { quietPage = false; }
+    if (rebuild) renderInspector();
+  };
+  return [
+    el('div.panel-title', { text: 'Page background', style: { marginTop: '4px' } }),
+    inspectorRow('Colour', colorInput(p.background, (value) => setPage({ background: value }))),
+    inspectorRow('Opacity', slider({ min: 0, max: 1, step: 0.05, value: p.backgroundOpacity }, (v) => setPage({ backgroundOpacity: v }))),
+    el('div.panel-title', { text: 'Page border', style: { marginTop: '4px' } }),
+    inspectorRow('Colour', colorInput(p.borderColor, (value) => setPage({ borderColor: value }))),
+    inspectorRow('Width', slider({ min: 0, max: 12, step: 0.1, value: p.borderWidth }, (v) => setPage({ borderWidth: v }, { rebuild: (v > 0) !== (p.borderWidth > 0) }))),
+    p.borderWidth > 0
+      ? inspectorRow('Opacity', slider({ min: 0, max: 1, step: 0.05, value: p.borderOpacity }, (v) => setPage({ borderOpacity: v })))
+      : el('p.row-edit-note', { text: 'Width 0 means no page border. Drag it up to draw one round the sheet.' }),
+  ];
+}
+
+/** The map frame: its border, the paper round it, and keeping the grid on it. */
+function groupMapFrame(elm) {
+  const s = elm.style;
+  const setStyle = styleSetter(elm);
+  const grid = state.elements.find((e) => e.type === 'grid');
+  const gridOff = grid && (grid.x !== elm.x || grid.y !== elm.y || grid.w !== elm.w || grid.h !== elm.h);
+  return section('Map frame', stack([
+    el('p.row-edit-note', { text: 'The map shows only inside this frame; the rest of the page is paper. Drag the frame by its edge, or resize it from a corner, and the map stays put underneath.' }),
+    el('div.panel-title', { text: 'Map border', style: { marginTop: '4px' } }),
+    inspectorRow('Colour', colorInput(s.color ?? '#0f172a', (value) => setStyle({ color: value }))),
+    inspectorRow('Width', slider({ min: 0, max: 6, step: 0.1, value: s.borderWidth ?? 1.2 }, (v) => setStyle({ borderWidth: v }))),
+    inspectorRow('Opacity', slider({ min: 0, max: 1, step: 0.05, value: s.borderOpacity ?? 1 }, (v) => setStyle({ borderOpacity: v }))),
+    ...pageLookControls(),
+    gridOff ? button('Fit the grid to this frame', () => {
+      checkpoint();
+      updateElement(grid.id, { x: elm.x, y: elm.y, w: elm.w, h: elm.h }, { history: false });
+      renderElements();
+      renderInspector();
+    }, 'soft', { style: { width: '100%' } }) : null,
   ]));
 }
 
@@ -455,16 +531,24 @@ function groupLogo(elm) {
 function groupShape(elm) {
   const s = elm.style;
   const setStyle = styleSetter(elm);
+  const kind = shapeKind(s.variant);
+  const fillable = kind === 'polygon' || kind === 'point';
+  const flip = (axis) => button(axis === 'x' ? 'Flip ↔' : 'Flip ↕', () => {
+    checkpoint();
+    updateElement(elm.id, { style: axis === 'x' ? { flipX: !s.flipX } : { flipY: !s.flipY } }, { history: false });
+    renderElements();
+    renderInspector();
+  }, 'ghost', { title: axis === 'x' ? 'Mirror left to right' : 'Mirror top to bottom' });
   return section('Shape', stack([
     labelled('Shape', select(
-      SHAPE_VARIANTS.map((v) => ({ value: v.id, label: v.label })),
+      SHAPE_VARIANTS.map((v) => ({ value: v.id, label: v.label, group: v.group })),
       s.variant, (value) => { setStyle({ variant: value }); renderInspector(); },
     )),
-    s.variant === 'line' ? null : inline([
+    fillable ? inline([
       colorInput(s.fill, (value, { live }) => { setStyle({ fill: value }); if (!live) renderInspector(); }, { transparent: true, title: 'Fill colour' }),
       el('span', { text: 'Fill', style: { fontSize: '11.5px', color: 'var(--ink-soft)', flex: '1' } }),
-    ]),
-    s.variant === 'line' ? null : inspectorRow('Fill opacity', slider({ min: 0, max: 1, step: 0.02, value: s.fillOpacity ?? 0 }, (v) => setStyle({ fillOpacity: v }))),
+    ]) : null,
+    fillable ? inspectorRow('Fill opacity', slider({ min: 0, max: 1, step: 0.02, value: s.fillOpacity ?? 0 }, (v) => setStyle({ fillOpacity: v }))) : null,
     inline([
       colorInput(s.stroke, (value, { live }) => { setStyle({ stroke: value }); if (!live) renderInspector(); }, { transparent: true, title: 'Outline colour' }),
       el('span', { text: 'Outline', style: { fontSize: '11.5px', color: 'var(--ink-soft)', flex: '1' } }),
@@ -478,12 +562,13 @@ function groupShape(elm) {
       ? inspectorRow('Corner radius', slider({ min: 0, max: 40, step: 1, value: s.radius ?? 0 }, (v) => setStyle({ radius: v })))
       : null,
     inspectorRow('Rotation', slider({ min: -180, max: 180, step: 1, value: s.rotation ?? 0, suffix: '°' }, (v) => setStyle({ rotation: v }))),
+    inline([flip('x'), flip('y')], '6px'),
   ]));
 }
 
 const GROUPS = {
   text: groupText, heading: groupHeading, type: groupType, chrome: groupChrome,
-  rows: groupRows, creditsText: groupCreditsText, grid: groupGrid,
+  rows: groupRows, creditsText: groupCreditsText, grid: groupGrid, mapframe: groupMapFrame,
   north: groupNorth, scale: groupScale, neatline: groupNeatline,
   inset: groupInset, legend: groupLegend, logo: groupLogo, shape: groupShape,
 };
@@ -850,9 +935,7 @@ function pageInspector() {
       ), real < state.page.dpi
         ? `${paper.label} is too big for ${state.page.dpi} dpi in a browser — the export will be ${real} dpi (${megapixels} megapixels), which is still ${real >= 150 ? 'fine for large-format printing at normal viewing distance' : 'best treated as a draft'}.`
         : `${Math.round(wide * real)} × ${Math.round(tall * real)} px at ${real} dpi — ${megapixels} megapixels.`),
-      inspectorRow('Page background', colorInput(state.page.background ?? '#ffffff', (value) => {
-        set({ page: { ...state.page, background: value } }, { history: false });
-      })),
+      ...pageLookControls(),
     ])),
     section('Tips', el('div', { style: { fontSize: '11.5px', color: '#475569', lineHeight: '1.55' } }, [
       el('p', { style: { margin: '0 0 6px' }, html: 'Drag any element inside the dashed page frame. Pink lines show when it lines up with the page or another element.' }),
@@ -887,5 +970,6 @@ export function initInspector() {
   // this panel fire them on every slider frame, and rebuilding then would
   // yank the control out from under the pointer. Those paths call
   // renderInspector() explicitly when the panel's shape actually changes.
-  subscribe(['selectedElementId', 'selectedLayerId', 'page', 'templateId', 'studyArea', 'insetEditing'], renderInspector);
+  subscribe(['selectedElementId', 'selectedLayerId', 'templateId', 'studyArea', 'insetEditing'], renderInspector);
+  subscribe(['page'], () => { if (!quietPage) renderInspector(); });
 }
