@@ -9,9 +9,12 @@
 
 import { $, el, fill } from '../core/dom.js';
 import { state, set, subscribe, checkpoint, touch } from '../core/store.js';
-import { FONTS, PAPER_SIZES, EXPORT_RESOLUTIONS, effectiveDpi, paperDimsLabel } from '../core/constants.js';
-import { ELEMENT_TYPES, elementLabel, SHAPE_VARIANTS } from '../layout/elements.js';
-import { updateElement, removeElement, duplicateElement, renderElements, layoutArtboard } from './artboard.js';
+import { FONTS, PAPER_SIZES, EXPORT_RESOLUTIONS, effectiveDpi, paperDimsLabel, BASEMAPS, basemapOptions } from '../core/constants.js';
+import { ELEMENT_TYPES, elementLabel, SHAPE_VARIANTS, zoomInsetView } from '../layout/elements.js';
+import {
+  updateElement, removeElement, duplicateElement, renderElements, layoutArtboard,
+  setInsetEditing, insetEditingId,
+} from './artboard.js';
 import { alignElements, placeElement, fillPage, PLACEMENT_SPOTS } from '../layout/align.js';
 import { updateLayer, removeLayer, applySymbology } from '../layers/registry.js';
 import {
@@ -21,6 +24,7 @@ import {
 import { legendEditor, layerLegendRows, iconPicker, dashPicker } from './legend-editor.js';
 import { numericKeys, propertyKeys } from '../data/upload.js';
 import { CONTEXT_MODES, contextLabel } from '../data/inset-context.js';
+import { creditsText } from '../layout/derive.js';
 import { flyToBounds } from '../core/map.js';
 import { boundsFromBbox } from '../core/geo.js';
 import { notify } from '../core/toast.js';
@@ -58,6 +62,178 @@ function groupHeading(elm) {
     updateElement(elm.id, { text: value, auto: false }, { history: false });
     renderElements();
   }, { placeholder: 'Leave empty to hide the heading' }));
+}
+
+/**
+ * The body of a generated block (Map information, Key figures), row by row.
+ *
+ * Every derived row can be relabelled, given a value of the user's own, or
+ * hidden; rows can be added. A value left empty stays automatic and keeps
+ * following the map. Typing writes straight through without redrawing this
+ * panel, so the field being typed in keeps its focus.
+ */
+function groupRows(elm) {
+  const derived = ELEMENT_TYPES[elm.type]?.rows?.() ?? [];
+  const edits = () => elm.rowEdits ?? { rows: {}, extra: [] };
+  let typed = false;
+  const write = (next, { rerender = false } = {}) => {
+    updateElement(elm.id, { rowEdits: next }, { history: false });
+    renderElements();
+    if (rerender) renderInspector();
+  };
+  // One undo step per field edited, taken on the first keystroke.
+  const onType = (apply) => (value) => {
+    if (!typed) { checkpoint(); typed = true; }
+    apply(value);
+  };
+  const field = (value, placeholder, onChange, title) => {
+    const node = textInput(value, onType(onChange), { placeholder, title });
+    node.addEventListener('blur', () => { typed = false; });
+    return node;
+  };
+  const patchRow = (key, patch) => {
+    const e = edits();
+    write({ ...e, rows: { ...(e.rows ?? {}), [key]: { ...(e.rows?.[key] ?? {}), ...patch } } });
+  };
+
+  const rowNodes = derived.map((row) => {
+    const e = edits().rows?.[row.label] ?? {};
+    const hide = el('button.row-edit-btn', {
+      type: 'button',
+      title: e.hidden ? 'Show this row' : 'Hide this row',
+      'aria-label': e.hidden ? `Show ${row.label}` : `Hide ${row.label}`,
+      text: e.hidden ? '◌' : '●',
+    });
+    hide.addEventListener('click', () => {
+      checkpoint();
+      const cur = edits();
+      write({ ...cur, rows: { ...(cur.rows ?? {}), [row.label]: { ...(cur.rows?.[row.label] ?? {}), hidden: !e.hidden } } }, { rerender: true });
+    });
+    const node = el('div.row-edit', {}, [
+      field(e.label ?? '', row.label, (v) => patchRow(row.label, { label: v }), 'Row label — empty uses the automatic one'),
+      field(e.value ?? '', String(row.value ?? ''), (v) => patchRow(row.label, { value: v }), 'Value — empty keeps it automatic'),
+      hide,
+    ]);
+    node.classList.toggle('is-hidden', Boolean(e.hidden));
+    return node;
+  });
+
+  const extraNodes = (edits().extra ?? []).map((row, i) => {
+    const setExtra = (patch) => {
+      const cur = edits();
+      const extra = [...(cur.extra ?? [])];
+      extra[i] = { ...extra[i], ...patch };
+      write({ ...cur, extra });
+    };
+    const remove = el('button.row-edit-btn', { type: 'button', title: 'Remove this row', 'aria-label': 'Remove this row', text: '×' });
+    remove.addEventListener('click', () => {
+      checkpoint();
+      const cur = edits();
+      write({ ...cur, extra: (cur.extra ?? []).filter((_, j) => j !== i) }, { rerender: true });
+    });
+    return el('div.row-edit', {}, [
+      field(row.label ?? '', 'Label', (v) => setExtra({ label: v }), 'Row label'),
+      field(row.value ?? '', 'Value', (v) => setExtra({ value: v }), 'Value'),
+      remove,
+    ]);
+  });
+
+  const edited = Boolean(elm.rowEdits && (Object.keys(elm.rowEdits.rows ?? {}).length || elm.rowEdits.extra?.length));
+  return section('Rows', stack([
+    el('p.row-edit-note', { text: 'Type over any label or value. A value left empty stays automatic and keeps updating with the map.' }),
+    el('div.row-edit-head', {}, [el('span', { text: 'Label' }), el('span', { text: 'Value' }), el('span')]),
+    ...rowNodes,
+    ...extraNodes,
+    inline([
+      button('Add row', () => {
+        checkpoint();
+        const cur = edits();
+        write({ ...cur, extra: [...(cur.extra ?? []), { label: '', value: '' }] }, { rerender: true });
+      }, 'soft'),
+      button('Reset to automatic', () => {
+        checkpoint();
+        updateElement(elm.id, { rowEdits: null }, { history: false });
+        renderElements();
+        renderInspector();
+      }, 'ghost', { disabled: !edited }),
+    ], '6px'),
+  ]));
+}
+
+/** Grid lines and coordinate labels: spacing, format, line style, which edges. */
+function groupGrid(elm) {
+  const s = elm.style;
+  const setStyle = styleSetter(elm);
+  const after = (patch) => { setStyle(patch); renderInspector(); };
+  const INTERVALS = [
+    { value: 'auto', label: 'Automatic — follows the zoom' },
+    { value: String(30 / 3600), label: '30″' },
+    { value: String(1 / 60), label: '1′' },
+    { value: String(2 / 60), label: '2′' },
+    { value: String(5 / 60), label: '5′' },
+    { value: String(10 / 60), label: '10′' },
+    { value: String(15 / 60), label: '15′' },
+    { value: String(30 / 60), label: '30′' },
+    { value: '1', label: '1°' },
+    { value: '2', label: '2°' },
+    { value: '5', label: '5°' },
+    { value: '10', label: '10°' },
+  ];
+  const current = s.interval === 'auto' || !s.interval ? 'auto' : String(s.interval);
+  return section('Grid', stack([
+    checkRow('Grid lines', s.showLines !== false, (on) => after({ showLines: on })),
+    checkRow('Coordinate labels', s.showLabels !== false, (on) => after({ showLabels: on })),
+    labelled('Interval', select(
+      INTERVALS.some((i) => i.value === current) ? INTERVALS : [...INTERVALS, { value: current, label: `${current}°` }],
+      current,
+      (value) => setStyle({ interval: value === 'auto' ? 'auto' : Number(value) }),
+    ), 'Automatic keeps four to eight lines across the frame at any zoom.'),
+    labelled('Label format', seg(
+      [{ value: 'dms', label: 'Deg · min · sec' }, { value: 'dd', label: 'Decimal' }],
+      s.format ?? 'dms',
+      (value) => after({ format: value }),
+    )),
+    s.showLabels !== false ? labelled('Label position', seg(
+      [{ value: 'outside', label: 'Outside frame' }, { value: 'inside', label: 'Inside frame' }],
+      s.labelPosition === 'inside' ? 'inside' : 'outside',
+      (value) => after({ labelPosition: value }),
+    ), s.labelPosition === 'inside'
+      ? 'Inside suits a full-bleed page with no margin.'
+      : 'Side labels turn to read upwards, so they fit a narrow margin.') : null,
+    s.showLabels !== false ? labelled('Label edges', inline([
+      checkRow('Top', s.labelTop !== false, (on) => setStyle({ labelTop: on })),
+      checkRow('Bottom', s.labelBottom !== false, (on) => setStyle({ labelBottom: on })),
+      checkRow('Left', s.labelLeft !== false, (on) => setStyle({ labelLeft: on })),
+      checkRow('Right', s.labelRight !== false, (on) => setStyle({ labelRight: on })),
+    ], '8px')) : null,
+    s.showLabels !== false ? checkRow('White halo behind labels', Boolean(s.halo), (on) => setStyle({ halo: on }), 'Keeps labels readable over busy imagery.') : null,
+    s.showLines !== false ? el('div.panel-title', { text: 'Lines', style: { marginTop: '4px' } }) : null,
+    s.showLines !== false ? inspectorRow('Colour', colorInput(s.lineColor ?? '#334155', (value) => setStyle({ lineColor: value }))) : null,
+    s.showLines !== false ? inspectorRow('Width', slider({ min: 0.2, max: 4, step: 0.1, value: s.lineWidth ?? 0.9 }, (v) => setStyle({ lineWidth: v }))) : null,
+    s.showLines !== false ? inspectorRow('Opacity', slider({ min: 0.05, max: 1, step: 0.05, value: s.lineOpacity ?? 0.7 }, (v) => setStyle({ lineOpacity: v }))) : null,
+    s.showLines !== false ? labelled('Style', seg(
+      [{ value: 'solid', label: 'Solid' }, { value: 'dashed', label: 'Dashed' }],
+      s.dash ?? 'solid',
+      (value) => after({ dash: value }),
+    )) : null,
+    el('p.row-edit-note', { text: 'Label colour and size are under Type below. Drag the grid by its edge to fit it to the map frame.' }),
+  ]));
+}
+
+/** The credits line: automatic attribution, or the user's own text. */
+function groupCreditsText(elm) {
+  let typed = false;
+  const area = textArea(elm.customText ?? '', (value) => {
+    if (!typed) { checkpoint(); typed = true; }
+    updateElement(elm.id, { customText: value }, { history: false });
+    renderElements();
+  }, 4);
+  area.placeholder = creditsText();
+  area.addEventListener('blur', () => { typed = false; });
+  return section('Text', stack([
+    area,
+    el('p.row-edit-note', { text: 'Leave empty to use the automatic attribution shown here. Data providers such as OpenStreetMap require credit on a published map.' }),
+  ]));
 }
 
 function groupType(elm) {
@@ -156,7 +332,42 @@ function groupInset(elm) {
   const mode = s.context ?? 'auto';
   const showsContext = mode !== 'none';
 
-  return section('Locator', stack([
+  const basemap = s.basemap ?? 'none';
+  const editing = insetEditingId() === elm.id;
+  const zoom = Number(s.viewZoom) || 0;
+  const zoomBy = (steps) => {
+    checkpoint();
+    updateElement(elm.id, { style: zoomInsetView(s, steps) }, { history: false });
+    renderInspector();
+  };
+  const viewChanged = zoom !== 0 || (s.viewPan ?? [0, 0]).some((v) => Math.abs(v) > 1e-4);
+
+  const mapSection = section('Inset map', stack([
+    labelled('Basemap', select(
+      [{ value: 'none', label: 'None — outlines only' }, ...basemapOptions()],
+      basemap,
+      (value) => { setStyle({ basemap: value }, false); renderElements(); renderInspector(); },
+    ), basemap === 'none'
+      ? 'Outlines on a plain card.'
+      : `${BASEMAPS[basemap]?.type === 'vector' ? 'Drawn from a matching raster version of this style. ' : ''}Printed at full export resolution.`),
+
+    labelled('View', stack([
+      inline([
+        button(editing ? 'Done' : 'Pan & zoom', () => { setInsetEditing(editing ? null : elm.id); renderInspector(); }, editing ? 'primary' : 'soft', { title: 'Drag inside the inset to pan, scroll to zoom. Or double-click the inset.' }),
+        button('−', () => zoomBy(-0.5), 'ghost', { title: 'Zoom the inset out', 'aria-label': 'Zoom the inset out' }),
+        button('+', () => zoomBy(0.5), 'ghost', { title: 'Zoom the inset in', 'aria-label': 'Zoom the inset in' }),
+        button('Reset', () => {
+          checkpoint();
+          updateElement(elm.id, { style: { viewZoom: 0, viewPan: [0, 0] } }, { history: false });
+          renderInspector();
+        }, 'ghost', { title: 'Fit the inset to the region again', disabled: !viewChanged }),
+      ], '6px'),
+    ]), editing
+      ? 'Drag inside the inset to pan; scroll to zoom. Esc or Done to finish.'
+      : `Zoom ${(2 ** zoom).toFixed(zoom % 1 ? 2 : 0)}× the fitted view. Double-click the inset to pan and zoom it directly.`),
+  ]));
+
+  return [mapSection, section('Locator', stack([
     // The whole job of a locator is to place the study area inside something
     // the reader recognises, so what that something is comes first.
     labelled('Show inside', select(
@@ -178,6 +389,9 @@ function groupInset(elm) {
     showsContext ? el('div.panel-title', { text: 'Surrounding region', style: { marginTop: '4px' } }) : null,
     showsContext ? inspectorRow('Fill', colorInput(s.contextFill ?? '#e2e8f0', (value) => setStyle({ contextFill: value }), { transparent: true })) : null,
     showsContext ? inspectorRow('Outline', colorInput(s.contextStroke ?? '#94a3b8', (value) => setStyle({ contextStroke: value }))) : null,
+    showsContext && basemap !== 'none'
+      ? inspectorRow('Tint over map', slider({ min: 0, max: 1, step: 0.05, value: s.contextOpacity ?? 0.3 }, (v) => setStyle({ contextOpacity: v })))
+      : null,
 
     s.extent ? inspectorRow('View marker', colorInput(s.extentStroke ?? '#dc2626', (value) => setStyle({ extentStroke: value }))) : null,
 
@@ -185,7 +399,7 @@ function groupInset(elm) {
       style: { margin: 0, fontSize: '10.5px', color: '#b45309', lineHeight: '1.4' },
       text: 'Load a study area and its outline appears here.',
     }),
-  ]));
+  ]))];
 }
 
 function groupLegend(elm) {
@@ -247,12 +461,12 @@ function groupShape(elm) {
       s.variant, (value) => { setStyle({ variant: value }); renderInspector(); },
     )),
     s.variant === 'line' ? null : inline([
-      colorInput(s.fill, (value) => { setStyle({ fill: value }); renderInspector(); }, { transparent: true, title: 'Fill colour' }),
+      colorInput(s.fill, (value, { live }) => { setStyle({ fill: value }); if (!live) renderInspector(); }, { transparent: true, title: 'Fill colour' }),
       el('span', { text: 'Fill', style: { fontSize: '11.5px', color: 'var(--ink-soft)', flex: '1' } }),
     ]),
     s.variant === 'line' ? null : inspectorRow('Fill opacity', slider({ min: 0, max: 1, step: 0.02, value: s.fillOpacity ?? 0 }, (v) => setStyle({ fillOpacity: v }))),
     inline([
-      colorInput(s.stroke, (value) => { setStyle({ stroke: value }); renderInspector(); }, { transparent: true, title: 'Outline colour' }),
+      colorInput(s.stroke, (value, { live }) => { setStyle({ stroke: value }); if (!live) renderInspector(); }, { transparent: true, title: 'Outline colour' }),
       el('span', { text: 'Outline', style: { fontSize: '11.5px', color: 'var(--ink-soft)', flex: '1' } }),
     ]),
     inspectorRow('Outline width', slider({ min: 0, max: 12, step: 0.2, value: s.strokeWidth ?? 1.6 }, (v) => setStyle({ strokeWidth: v }))),
@@ -269,6 +483,7 @@ function groupShape(elm) {
 
 const GROUPS = {
   text: groupText, heading: groupHeading, type: groupType, chrome: groupChrome,
+  rows: groupRows, creditsText: groupCreditsText, grid: groupGrid,
   north: groupNorth, scale: groupScale, neatline: groupNeatline,
   inset: groupInset, legend: groupLegend, logo: groupLogo, shape: groupShape,
 };
@@ -385,7 +600,8 @@ function groupPosition(elm) {
 
 function elementInspector(elm) {
   const def = ELEMENT_TYPES[elm.type];
-  const groups = (def?.inspect ?? []).map((key) => GROUPS[key]?.(elm)).filter(Boolean);
+  // A group may return one section or several.
+  const groups = (def?.inspect ?? []).flatMap((key) => GROUPS[key]?.(elm) ?? []).filter(Boolean);
 
   return [
     head(elementLabel(elm), def?.hint),
@@ -454,7 +670,7 @@ function layerInspector(layer) {
             ? inspectorRow('Fill opacity', slider({ min: 0, max: 1, step: 0.05, value: s.fillOpacity ?? 0.35 }, (v) => setStyle({ fillOpacity: v })))
             : null,
           single && layer.kind === 'polygon' ? inline([
-            colorInput(s.stroke, (value) => { setStyle({ stroke: value }, false); refresh(true); }, { transparent: true, title: 'Outline colour' }),
+            colorInput(s.stroke, (value, { live }) => { setStyle({ stroke: value }, false); refresh(!live); }, { transparent: true, title: 'Outline colour' }),
             el('span', { text: 'Outline colour', style: { fontSize: '11.5px', color: 'var(--ink-soft)', flex: '1' } }),
           ]) : null,
           // Line work is the layer itself, not an edge around something else,
@@ -671,5 +887,5 @@ export function initInspector() {
   // this panel fire them on every slider frame, and rebuilding then would
   // yank the control out from under the pointer. Those paths call
   // renderInspector() explicitly when the panel's shape actually changes.
-  subscribe(['selectedElementId', 'selectedLayerId', 'page', 'templateId', 'studyArea'], renderInspector);
+  subscribe(['selectedElementId', 'selectedLayerId', 'page', 'templateId', 'studyArea', 'insetEditing'], renderInspector);
 }
