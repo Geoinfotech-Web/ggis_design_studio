@@ -127,8 +127,15 @@ export async function through(entry, load, opts = {}) {
   }
 
   if (config.l2) {
-    const hit = await remote.lookup(entry, { maxAgeMs: maxAge });
-    if (hit) {
+    // Asked for any age. The shared database is filled in bulk from a
+    // country extract (server/import-pbf.mjs) and refreshed by re-running
+    // that, so an entry past MAX_AGE is still the right answer to show now —
+    // asking for fresh-only sent every request back to the public Overpass
+    // servers, ten seconds or more each, as soon as an import was a month old.
+    // It is not revalidated from here: a state-sized refresh is the import's
+    // job, and queueing one behind every click would crowd out real requests.
+    const hit = await remote.lookup(entry);
+    if (hit && (fresh(hit) || !stale || (hit.createdAt ?? 0) >= (stale.hit.createdAt ?? 0))) {
       opts.onProgress?.('Loaded from the shared database');
       const result = label(hit, 'database', entry);
       // Fill L1 with what the database gave us, so the next reload skips
@@ -163,8 +170,6 @@ export async function through(entry, load, opts = {}) {
  * @returns {Promise<{source:'browser'|'database', bbox:number[], features?:number}|null>}
  */
 export async function available(entry) {
-  const maxAge = MAX_AGE[entry.provider] ?? MAX_AGE.osm;
-
   if (config.l1) {
     const hit = await idb.get(entry);
     // Expired is still *available* — `through()` will serve it and refresh
@@ -172,7 +177,7 @@ export async function available(entry) {
     if (hit) return { source: 'browser', bbox: hit.bbox, features: hit.features };
   }
   if (config.l2) {
-    const hit = await remote.probe(entry, { maxAgeMs: maxAge });
+    const hit = await remote.probe(entry);
     if (hit) return { source: 'database', bbox: hit.bbox, features: hit.features };
   }
   return null;

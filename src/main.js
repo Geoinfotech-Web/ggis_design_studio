@@ -41,7 +41,6 @@ import { initAreaPane, renderAreaPane } from './ui/panels/area.js';
 import { initStartPane, renderStartPane } from './ui/panels/start.js';
 import { initProjectsPane, renderProjectsPane } from './ui/panels/projects.js';
 import { initDataPane, renderDataPane } from './ui/panels/data.js';
-import { initAnalysisPane, renderAnalysisPane } from './ui/panels/analysis.js';
 import { initElementsPane, renderElementsPane } from './ui/panels/elements.js';
 import { initLayersPane, renderLayersPane } from './ui/panels/layers.js';
 import { initAiPane, renderAiPane } from './ui/panels/ai.js';
@@ -54,7 +53,6 @@ const PANE_RENDERERS = {
   templates: renderTemplatesPane,
   projects: renderProjectsPane,
   data: renderDataPane,
-  analysis: renderAnalysisPane,
   ai: renderAiPane,
   elements: renderElementsPane,
   layers: renderLayersPane,
@@ -106,7 +104,6 @@ function initStudio() {
   initTemplatesPane();
   initProjectsPane({ openProject, newMap });
   initDataPane();
-  initAnalysisPane();
   initAiPane();
   initElementsPane();
   initLayersPane();

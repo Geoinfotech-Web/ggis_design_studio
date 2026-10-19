@@ -17,7 +17,7 @@
  */
 
 import { state, set } from '../core/store.js';
-import { combinedAreaKm2 } from '../core/geo.js';
+import { combinedAreaKm2, cleanPolygons, areaKm2, bboxOf } from '../core/geo.js';
 import { addVectorLayer, removeLayer, findBySource } from '../layers/registry.js';
 
 /**
@@ -153,8 +153,27 @@ export function redrawBoundaries() {
  *        means "map this instead", not "map this as well".
  * @returns {{added: boolean, reason?: string}}
  */
-export function addStudyArea(area, { replace = false } = {}) {
-  if (!area) return { added: false, reason: 'No area' };
+/**
+ * Make an area's outline valid geometry before anything cuts with it, so a
+ * self-crossing ring or overlapping parts cannot become a topology error in
+ * clipping or dissolving later. Done once; the world boundaries arrive clean.
+ */
+function withCleanOutline(area) {
+  if (!area?.geojson || area.topologyClean) return area;
+  const { geojson, repaired } = cleanPolygons(area.geojson);
+  if (!geojson.features.length) return { ...area, topologyClean: true };
+  return {
+    ...area,
+    geojson,
+    areaKm2: repaired ? areaKm2(geojson) : area.areaKm2,
+    bbox: repaired ? (bboxOf(geojson) ?? area.bbox) : area.bbox,
+    topologyClean: true,
+  };
+}
+
+export function addStudyArea(input, { replace = false } = {}) {
+  if (!input) return { added: false, reason: 'No area' };
+  const area = withCleanOutline(input);
   const key = areaKey(area);
 
   if (replace) {

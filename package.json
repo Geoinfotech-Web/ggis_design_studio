@@ -15,6 +15,8 @@
     "accounts": "node server/account-server.mjs",
     "prefetch": "node server/prefetch.mjs",
     "import": "node --max-old-space-size=8192 server/import-pbf.mjs",
+    "import:world": "node --max-old-space-size=8192 server/import-world.mjs",
+    "extract:world": "python -I server/extract-world.py",
     "ai": "node server/ai-backend.mjs"
   },
   "dependencies": {
@@ -24,6 +26,7 @@
     "@turf/bbox": "^7.1.0",
     "@turf/buffer": "^7.1.0",
     "@turf/centroid": "^7.1.0",
+    "@turf/difference": "^7.4.0",
     "@turf/distance": "^7.4.0",
     "@turf/intersect": "^7.4.0",
     "@turf/length": "^7.4.0",
@@ -34,6 +37,7 @@
     "osmtogeojson": "^3.0.0-beta.5",
     "pbf": "^5.1.2",
     "pmtiles": "^4.5.0",
+    "polygon-clipping": "^0.15.7",
     "shpjs": "^6.1.0"
   },
   "devDependencies": {
