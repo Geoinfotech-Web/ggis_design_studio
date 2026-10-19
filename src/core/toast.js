@@ -14,15 +14,24 @@ function mount() {
  * @param {object} [opts]
  * @param {'info'|'ok'|'warn'|'error'|'busy'} [opts.tone]
  * @param {number} [opts.duration]  ms; 0 keeps it until dismissed
+ * @param {{label:string, run:() => void}[]} [opts.actions]  buttons; each closes the message
  * @returns {{ update: (msg:string, o?:object) => void, close: () => void }}
  */
 export function toast(message, opts = {}) {
-  const { tone = 'info', duration = tone === 'busy' ? 0 : 3600 } = opts;
+  const { tone = 'info', duration = tone === 'busy' ? 0 : 3600, actions = [] } = opts;
   const root = mount();
   if (!root) return { update() {}, close() {} };
 
   const body = el('div', { html: message, style: { flex: '1' } });
-  const node = el(`div.toast.toast--${tone}`, {}, [tone === 'busy' ? el('span.spinner') : null, body]);
+  const buttons = actions.length ? el('div.toast-actions', {}, actions.map(({ label, run }) => {
+    const btn = el('button.toast-action', { type: 'button', text: label });
+    btn.addEventListener('click', () => { close(); run(); });
+    return btn;
+  })) : null;
+  const node = el(`div.toast.toast--${tone}`, {}, [
+    tone === 'busy' ? el('span.spinner') : null,
+    buttons ? el('div', { style: { flex: '1' } }, [body, buttons]) : body,
+  ]);
   root.append(node);
 
   let timer = duration ? setTimeout(close, duration) : null;

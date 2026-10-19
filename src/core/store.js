@@ -56,7 +56,6 @@ export const state = {
   selectedLayerId: null,               // right panel shows layer styling instead
 
   analysisRuns: [],                    // completed analysis jobs
-  analysisBusy: false,
 
   hydrated: false,
 };

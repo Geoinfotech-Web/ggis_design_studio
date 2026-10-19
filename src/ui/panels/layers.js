@@ -117,7 +117,7 @@ export function render() {
     list.length
       ? el('div', { style: { padding: '10px 14px' } }, list.map(layerRow))
       : el('div.panel-section', {}, [
-          empty('Nothing on the map yet.<br />Add open data, upload a file, or run an analysis.'),
+          empty('Nothing on the map yet.<br />Add open data or upload a file.'),
           button('Browse open data', () => setTool('data'), 'soft', { style: { width: '100%', marginTop: '10px' } }),
         ]),
     list.length ? section('', el('p', {

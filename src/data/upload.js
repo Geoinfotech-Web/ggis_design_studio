@@ -6,6 +6,7 @@
  */
 
 import { kml, gpx } from '@tmcw/togeojson';
+import { cleanPolygons } from '../core/geo.js';
 
 export const ACCEPTED = '.geojson,.json,.kml,.kmz,.gpx,.zip,.csv,.txt';
 
@@ -76,11 +77,34 @@ function asCollection(input) {
 }
 
 /**
- * Parse a File into GeoJSON.
+ * Parse a File into GeoJSON, with its polygons made valid.
+ *
+ * Shapefiles in particular often carry topology errors — self-crossing
+ * rings, spikes, overlapping parts — that would break clipping and
+ * dissolving later. Polygons are repaired here, once, as they come in;
+ * points and lines pass through untouched. `repaired` says how many needed it.
+ *
  * @param {File} file
- * @returns {Promise<{geojson: object, name: string, format: string}>}
+ * @returns {Promise<{geojson: object, name: string, format: string, repaired: number}>}
  */
 export async function parseGeoFile(file) {
+  const parsed = await readGeoFile(file);
+  const features = parsed.geojson.features ?? [];
+  const isPolygon = (f) => f?.geometry?.type === 'Polygon' || f?.geometry?.type === 'MultiPolygon';
+  if (!features.some(isPolygon)) return { ...parsed, repaired: 0 };
+
+  // Repair in place, keeping every feature where it was in the file.
+  let repaired = 0;
+  const out = features.map((f) => {
+    if (!isPolygon(f)) return f;
+    const result = cleanPolygons({ type: 'FeatureCollection', features: [f] });
+    repaired += result.repaired;
+    return result.geojson.features[0] ?? null;
+  }).filter(Boolean);
+  return { ...parsed, geojson: { ...parsed.geojson, features: out }, repaired };
+}
+
+async function readGeoFile(file) {
   const name = file.name.replace(/\.[^.]+$/, '');
   const ext = (file.name.split('.').pop() ?? '').toLowerCase();
 

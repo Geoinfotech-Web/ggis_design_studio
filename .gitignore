@@ -3,8 +3,6 @@ dist/
 .vite/
 coverage/
 *.local
-.env
-.env.*
 !.env.example
 .DS_Store
 Thumbs.db
@@ -13,3 +11,4 @@ Thumbs.db
 
 # The geodata cache database — rebuildable, and far too big for git.
 server/data/
+config.bat

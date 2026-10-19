@@ -23,6 +23,7 @@ import { createServer } from 'node:http';
 import {
   openDb, lookup, has, assemble, put, stats, prune, purge, gunzipSync, DEFAULT_PATH,
 } from './db.mjs';
+import { openWorldDb, searchWorld, listWorld, getWorldUnit, worldStats, WORLD_PATH } from './world.mjs';
 
 const PORT = Number(process.env.PORT ?? 8788);
 const ORIGIN = process.env.ALLOW_ORIGIN ?? 'http://localhost:5173';
@@ -30,6 +31,9 @@ const ORIGIN = process.env.ALLOW_ORIGIN ?? 'http://localhost:5173';
 const MAX_UPLOAD = Number(process.env.MAX_UPLOAD ?? 128 * 1024 * 1024);
 
 const db = openDb();
+// The world boundaries (server/import-world.mjs). Optional: without it the
+// /world routes answer 503 and the studio falls back to searching online.
+const world = openWorldDb();
 
 const CORS = {
   'Access-Control-Allow-Origin': ORIGIN,
@@ -147,6 +151,46 @@ async function putEntry(req, res) {
   return json(res, 201, { ok: true, ...written, dropped });
 }
 
+/**
+ * GET /world/search?q=&country=&level=&parent=&limit=  → [{id, name, level, country, parentName, bbox, areaKm2}]
+ * GET /world/list?country=&level=  or  ?parent=          → the same shape, every unit
+ * GET /world/unit/:id                                   → its GeoJSON geometry, gzipped as stored
+ */
+function worldRoute(req, res, url) {
+  if (!world) return json(res, 503, { error: 'World boundaries are not imported. Run: node server/import-world.mjs <folder>' });
+  const p = url.searchParams;
+  if (url.pathname === '/world/search') {
+    return json(res, 200, searchWorld(world, {
+      q: p.get('q') ?? '', country: p.get('country') ?? '', level: p.get('level') ?? '',
+      parent: p.get('parent'), limit: p.get('limit'),
+    }));
+  }
+  if (url.pathname === '/world/list') {
+    return json(res, 200, listWorld(world, { country: p.get('country') ?? '', level: p.get('level') ?? 'state', parent: p.get('parent') }));
+  }
+  const id = url.pathname.match(/^\/world\/unit\/(\d+)$/)?.[1];
+  if (id) {
+    const found = getWorldUnit(world, id);
+    if (!found) return json(res, 404, { error: 'No such unit.' });
+    // The outline is stored gzipped; the properties ride in a header so the
+    // body can go out without being unpacked here.
+    const headers = {
+      'Content-Type': 'application/json',
+      'Cache-Control': 'public, max-age=604800',
+      'X-World-Unit': Buffer.from(JSON.stringify(found.unit)).toString('base64'),
+      ...CORS,
+      'Access-Control-Expose-Headers': 'X-World-Unit',
+    };
+    if (/gzip/.test(req.headers['accept-encoding'] ?? '')) {
+      res.writeHead(200, { ...headers, 'Content-Encoding': 'gzip' });
+      return res.end(found.geom);
+    }
+    res.writeHead(200, headers);
+    return res.end(gunzipSync(found.geom));
+  }
+  return json(res, 404, { error: 'GET /world/search, /world/list, /world/unit/:id' });
+}
+
 /* ------------------------------------------------------------------ */
 
 createServer(async (req, res) => {
@@ -160,6 +204,9 @@ createServer(async (req, res) => {
   try {
     if (req.method === 'GET' && url.pathname === '/health') {
       return json(res, 200, { ok: true, db: DEFAULT_PATH, origin: ORIGIN });
+    }
+    if (req.method === 'GET' && url.pathname.startsWith('/world/')) {
+      return worldRoute(req, res, url);
     }
     if (req.method === 'GET' && url.pathname === '/stats') {
       return json(res, 200, stats(db));
@@ -201,4 +248,7 @@ createServer(async (req, res) => {
   console.log(`Geodata cache on http://localhost:${PORT}  (allowing ${ORIGIN})`);
   console.log(`Database ${DEFAULT_PATH}`);
   console.log(`Holding ${entries.toLocaleString()} downloads, ${(bytes / 1024 ** 2).toFixed(1)} MB compressed.`);
+  console.log(world
+    ? `World boundaries: ${Object.entries(worldStats(world)).map(([k, v]) => `${v.toLocaleString()} ${k}`).join(', ')}  (${WORLD_PATH})`
+    : 'World boundaries not imported — run node server/import-world.mjs <folder> to add them.');
 });

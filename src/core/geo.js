@@ -5,6 +5,7 @@ import turfBbox from '@turf/bbox';
 import turfCentroid from '@turf/centroid';
 import turfBuffer from '@turf/buffer';
 import turfUnion from '@turf/union';
+import polygonClipping from 'polygon-clipping';
 
 const unwrap = (m) => (typeof m === 'function' ? m : m.default);
 const area = unwrap(turfArea);
@@ -48,6 +49,44 @@ export function combinedAreaKm2(geojsons) {
   } catch { /* fall through to the sum */ }
 
   return polygons.reduce((sum, f) => sum + areaKm2(f), 0);
+}
+
+/**
+ * The same polygons, as valid geometry.
+ *
+ * Boundaries arrive with topology errors more often than you would hope: an
+ * OpenStreetMap outline whose ring crosses itself, a shapefile digitised with
+ * a spike or a duplicated ring, two parts of a MultiPolygon that overlap.
+ * Every later step that cuts with the outline — clipping data, trimming the
+ * sea, dissolving several areas — can fail or quietly go wrong on those.
+ *
+ * Each feature is put through a polygon union with itself, which splits
+ * self-intersections, merges overlaps, drops zero-area slivers and orients
+ * every ring consistently. Points and lines are left out: a boundary is an
+ * area. A feature the repair cannot handle is kept exactly as it came.
+ *
+ * @returns {{geojson: object, repaired: number}}
+ */
+export function cleanPolygons(geojson) {
+  const features = [];
+  let repaired = 0;
+  for (const f of geojson?.features ?? (geojson?.type === 'Feature' ? [geojson] : [])) {
+    const g = f?.geometry;
+    if (g?.type !== 'Polygon' && g?.type !== 'MultiPolygon') continue;
+    try {
+      const fixed = polygonClipping.union(g.coordinates);
+      if (!fixed.length) { repaired += 1; continue; }
+      const geometry = fixed.length === 1
+        ? { type: 'Polygon', coordinates: fixed[0] }
+        : { type: 'MultiPolygon', coordinates: fixed };
+      const before = Math.abs(areaKm2(f)); const after = areaKm2({ type: 'Feature', properties: {}, geometry });
+      if (Math.abs(before - after) > 1e-6 * Math.max(before, 1e-3)) repaired += 1;
+      features.push({ ...f, geometry });
+    } catch {
+      features.push(f);
+    }
+  }
+  return { geojson: { type: 'FeatureCollection', features }, repaired };
 }
 
 /** [west, south, east, north] */

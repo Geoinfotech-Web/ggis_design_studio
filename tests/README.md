@@ -18,7 +18,6 @@ npm run coverage  # one-shot + coverage report (coverage/index.html)
 | `geo.test.js` | [`src/core/geo.js`](../src/core/geo.js) | Geodesy and clipping — `combinedAreaKm2` **dissolves** overlapping areas instead of summing them; `clipToArea` trims lines at the boundary; formatting (`formatDMS`, `formatArea`). |
 | `symbology.test.js` | [`src/layers/symbology.js`](../src/layers/symbology.js) | **Legend ↔ paint parity**: every legend-row colour appears in the map paint expression, so a legend can never show a colour the map is not drawing. Plus graduated classing, mm line widths, and immutable edits. |
 | `overture-merge.test.js` | [`src/data/overture-merge.js`](../src/data/overture-merge.js) | The Overture → OpenStreetMap tag translation — a feature reaches the classifier indistinguishable from an Overpass one, and each theme is narrowed to its subject. |
-| `analysis.test.js` | [`src/analysis/tools.js`](../src/analysis/tools.js) | Each geoprocessing tool computes for real — buffers, nearest-facility distances, clip/count/area/length/volume — on fixture layers. |
 
 ## Conventions
 

@@ -144,3 +144,24 @@ describe('clipToArea', () => {
     expect(clipToArea(data, fc([point(0, 0)]))).toBe(data);
   });
 });
+
+describe('cleanPolygons', () => {
+  it('repairs a self-crossing (bow-tie) ring into valid polygons', async () => {
+    const { cleanPolygons } = await import('../src/core/geo.js');
+    const bowtie = { type: 'Feature', properties: { name: 'x' }, geometry: { type: 'Polygon', coordinates: [[[0, 0], [1, 1], [1, 0], [0, 1], [0, 0]]] } };
+    const { geojson, repaired } = cleanPolygons({ type: 'FeatureCollection', features: [bowtie] });
+    expect(repaired).toBe(1);
+    expect(geojson.features[0].geometry.type).toBe('MultiPolygon');
+    expect(geojson.features[0].geometry.coordinates).toHaveLength(2);
+    expect(geojson.features[0].properties.name).toBe('x');
+  });
+
+  it('leaves a valid polygon unrepaired and drops non-polygons', async () => {
+    const { cleanPolygons } = await import('../src/core/geo.js');
+    const square = { type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]] } };
+    const point = { type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [0, 0] } };
+    const { geojson, repaired } = cleanPolygons({ type: 'FeatureCollection', features: [square, point] });
+    expect(repaired).toBe(0);
+    expect(geojson.features).toHaveLength(1);
+  });
+});

@@ -9,6 +9,7 @@
 
 import { ENDPOINTS } from '../core/constants.js';
 import { areaKm2, bboxOf, centroidOf } from '../core/geo.js';
+import { clipAreaToLand } from './land.js';
 
 const cache = new Map();
 let lastCall = 0;
@@ -82,7 +83,7 @@ export async function lookupBoundary(opts) {
     center: centroidOf(geojson),
     // Carried so the locator inset knows which country to draw this inside
     // without having to guess it back out of the display name.
-    countryCode: opts.countryCode || '',
+    countryCode: opts.countryCode || feature.properties?.address?.country_code || '',
     osmType: feature.properties?.osm_type ?? 'relation',
     // OpenStreetMap's own id for the boundary, which is what tells two study
     // areas apart when a map has several. Two places can share a name — Niger
@@ -90,15 +91,18 @@ export async function lookupBoundary(opts) {
     osmId: feature.properties?.osm_id ?? null,
   };
 
-  cache.set(key, result);
-  return result;
+  // A coastal outline runs out to the territorial-sea limit; trim it to the
+  // coast before anything draws it or clips data to it. See data/land.js.
+  const onLand = await clipAreaToLand(result);
+  cache.set(key, onLand);
+  return onLand;
 }
 
 /** Free-text place suggestions for the search box (no polygons — fast). */
 export async function suggestPlaces(text, countryCode, signal) {
   const q = (text ?? '').trim();
   if (q.length < 3) return [];
-  const params = new URLSearchParams({ format: 'json', limit: '6', q });
+  const params = new URLSearchParams({ format: 'json', limit: '10', q });
   if (countryCode) params.set('countrycodes', countryCode);
   await throttle();
   const res = await fetch(`${ENDPOINTS.nominatim}?${params}`, { signal });

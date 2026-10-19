@@ -40,8 +40,6 @@ const TOOLS = [
     d: 'M12 5v14M5 12h14' },
   { id: 'data',     label: 'Data',
     d: 'M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3zM4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3' },
-  { id: 'analysis', label: 'Analysis',
-    d: 'M4 20V4M4 20h16M8 16l3.5-5 3 2.5L19 7' },
   { id: 'elements', label: 'Elements',
     d: 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z' },
   { id: 'layers',   label: 'Layers',
@@ -144,7 +142,7 @@ let exported = false;
 const STEPS = [
   { id: 'area',     label: 'Study area', tools: ['area'],                done: () => Boolean(state.studyArea) },
   { id: 'start',    label: 'Start map',  tools: ['start', 'templates'],  done: () => Boolean(state.mapStarted) },
-  { id: 'data',     label: 'Data',       tools: ['data', 'analysis'],    done: () => state.layers.some((l) => l.source === 'osm' || l.source === 'overture' || l.source === 'upload') },
+  { id: 'data',     label: 'Data',       tools: ['data'],                done: () => state.layers.some((l) => l.source === 'osm' || l.source === 'overture' || l.source === 'upload') },
   { id: 'elements', label: 'Compose',    tools: ['elements', 'layers'],  done: () => exported },
   { id: 'export',   label: 'Export',     tools: [],                      done: () => exported },
 ];

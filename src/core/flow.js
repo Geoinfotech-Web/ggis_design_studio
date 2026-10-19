@@ -15,7 +15,7 @@ import { state } from './store.js';
 export const stage = () => (!state.studyArea ? 'area' : !state.mapStarted ? 'start' : 'open');
 
 /** Panels that are part of the work on a map, as opposed to getting to one. */
-const GATED = new Set(['templates', 'data', 'analysis', 'elements', 'layers', 'ai']);
+const GATED = new Set(['templates', 'data', 'elements', 'layers', 'ai']);
 
 export function toolLocked(id) {
   const now = stage();

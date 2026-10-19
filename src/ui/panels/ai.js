@@ -156,7 +156,7 @@ export function render() {
       button('Write a summary of this map', summariseLocally, 'soft', { style: { width: '100%' } }),
       el('p', {
         style: { margin: 0, fontSize: '10.5px', color: 'var(--ink-faint)', lineHeight: '1.45' },
-        text: 'Composed here from your layers and analysis results — accurate, and works with no backend at all.',
+        text: 'Composed here from your study area and layers — accurate, and works with no backend at all.',
       }),
     ])),
     section('Ask', stack([quick, composer()])),
@@ -164,7 +164,7 @@ export function render() {
     el('div.panel-section', {}, [
       el('p', {
         style: { margin: 0, fontSize: '10.5px', lineHeight: '1.5', color: 'var(--ink-faint)' },
-        text: 'The assistant only sees the description of your map — layer names, counts, analysis figures. Your data files are never uploaded.',
+        text: 'The assistant only sees the description of your map — layer names and counts. Your data files are never uploaded.',
       }),
     ]),
   ]);

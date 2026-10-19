@@ -395,7 +395,26 @@ export const RAMPS = {
 /* Study-area presets. Nigeria first because that is the team's focus, */
 /* but the Nominatim lookup itself is global.                          */
 /* ------------------------------------------------------------------ */
-export const COUNTRIES = [
+// Every other country, by ISO 3166 alpha-2, named in English by the browser.
+const WORLD_CODES = (
+  'ad ae af ag al am ao ar at au az ba bb bd be bf bg bh bi bn bo br bs bt bw by bz ca cd cf cg ch ci cl cn '
+  + 'co cr cu cv cy cz de dj dk dm do dz ec ee eg er es et fi fj fm fr ga gb gd ge gm gn gq gr gt gw gy hn hr '
+  + 'ht hu id ie il in iq ir is it jm jo jp kg kh ki km kn kp kr kw kz la lb lc li lk lr ls lt lu lv ly ma mc '
+  + 'md me mg mh mk ml mm mn mr mt mu mv mw mx my mz na ni nl no np nr nz om pa pe pg ph pk pl pt pw py qa ro '
+  + 'rs ru rw sa sb sc sd se sg si sk sl sm sn so sr ss st sv sy sz tg th tj tl tm tn to tr tt tv tw tz ua ug '
+  + 'us uy uz va vc ve vn vu ws xk ye zm zw ps eh gl pr nc pf hk'
+).split(' ');
+
+const regionName = (() => {
+  try {
+    const names = new Intl.DisplayNames(['en'], { type: 'region' });
+    return (code) => names.of(code.toUpperCase()) ?? code.toUpperCase();
+  } catch {
+    return (code) => code.toUpperCase();
+  }
+})();
+
+const FEATURED = [
   { code: 'ng', name: 'Nigeria' },
   { code: 'gh', name: 'Ghana' },
   { code: 'ke', name: 'Kenya' },
@@ -404,7 +423,19 @@ export const COUNTRIES = [
   { code: 'bj', name: 'Benin' },
   { code: 'ne', name: 'Niger' },
   { code: 'td', name: 'Chad' },
+];
+
+/**
+ * The country picker: the team's usual countries first, then the whole
+ * world as one searchable place, then every other country A–Z.
+ */
+export const COUNTRIES = [
+  ...FEATURED,
   { code: '',   name: 'Anywhere in the world' },
+  ...WORLD_CODES
+    .filter((code) => !FEATURED.some((c) => c.code === code))
+    .map((code) => ({ code, name: regionName(code) }))
+    .sort((a, b) => a.name.localeCompare(b.name)),
 ];
 
 export const NIGERIA_STATES = [

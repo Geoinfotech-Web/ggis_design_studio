@@ -34,7 +34,7 @@ const mod = (ch, shift = false) => (e) => (e.ctrlKey || e.metaKey) && !e.altKey 
 const call = (name, ...args) => () => actions[name]?.(...args);
 
 const PANELS = [
-  ['area', 'Study area'], ['start', 'Start map'], ['data', 'Data'], ['analysis', 'Analysis'],
+  ['area', 'Study area'], ['start', 'Start map'], ['data', 'Data'],
   ['elements', 'Elements'], ['layers', 'Layers'], ['projects', 'My projects'], ['ai', 'AI assistant'],
 ];
 
