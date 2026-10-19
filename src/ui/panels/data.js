@@ -21,6 +21,7 @@ import {
 } from '../../data/overture.js';
 import { parseGeoFile, ACCEPTED } from '../../data/upload.js';
 import { areaParts } from '../../data/study-areas.js';
+import { listWorld } from '../../data/world.js';
 import { uiIcon } from '../ui-icons.js';
 import { addVectorLayer, removeLayer, replaceBySlug } from '../../layers/registry.js';
 import { categorisedSymbology, singleSymbology, valuesIn, DEFAULT_LINE_WIDTH_MM } from '../../layers/symbology.js';
@@ -180,20 +181,6 @@ function reclip(on) {
 /* ------------------------------------------------------------------ */
 /* fetching                                                            */
 /* ------------------------------------------------------------------ */
-/**
- * How to name this study area to the prefetch script.
- *
- * The bare name is not enough and the failure is silent rather than loud:
- * "Niger" is a state and also the country next door, and Nominatim answers
- * with the larger one. Nominatim's own display name resolves unambiguously
- * but can run to eight components, so this keeps the first and the last —
- * "Niger, Nigeria" — which is both short and unmistakable.
- */
-function prefetchName(area) {
-  const parts = (area.displayName ?? area.name ?? '').split(',').map((p) => p.trim()).filter(Boolean);
-  if (parts.length < 2) return area.name ?? '';
-  return `${parts[0]}, ${parts[parts.length - 1]}`;
-}
 
 /**
  * Fetch one dataset for one study area, both providers, merged and clipped.
@@ -365,6 +352,49 @@ function scheduleWarm() {
   warmTimer = setTimeout(() => { warmStudyArea().catch(() => {}); }, 900);
 }
 
+/**
+ * A study area too big to ask for in one go, as the regions inside it.
+ *
+ * A whole country is far over what a public Overpass server will answer, but
+ * every one of its states may already be in the database — Nigeria's are,
+ * imported from the national extract — and each of those is a direct hit.
+ * So a country is fetched state by state, each piece is clipped to the
+ * country's own outline, and the pieces are joined with duplicates along
+ * their shared borders dropped (fetchAllParts does that by OSM id).
+ *
+ * Returns null unless every piece is either already stored or small enough
+ * to fetch live: a half-loaded country would be worse than an honest no.
+ */
+async function piecesFor(dataset, part) {
+  if (part.level !== 'country' || !part.countryCode) return null;
+  const regions = await listWorld({ country: part.countryCode, level: 'state' });
+  if (!regions.length) return null;
+  const usable = await Promise.all(regions.map(async (r) =>
+    checkSize(dataset, r.bbox).ok || Boolean(await isDatasetCached(dataset, r.bbox))));
+  if (!usable.every(Boolean)) return null;
+  return regions.map((r) => ({ name: r.name, bbox: r.bbox, geojson: part.geojson, osmId: `${part.osmId}/${r.id}` }));
+}
+
+/** Which dataset to offer instead of a heavy one that is too much for an area. */
+const LIGHTER = { 'roads-local': 'roads-major', buildings: 'settlements' };
+
+/** Explain a refusal plainly, with the ways forward as buttons. */
+function refuseTooBig(dataset, part, many) {
+  const where = many ? `<b>${part.name}</b>: ` : '';
+  const lighter = datasetBySlug(LIGHTER[dataset.slug]);
+  const message = dataset.heavy
+    ? `${where}<b>${dataset.name}</b> for all of ${part.name} is far too much to draw — millions of features, and unreadable at this scale anyway. It works for a state, an LGA or a city.`
+    : `${where}<b>${dataset.name}</b> is not stored for an area this size yet, and ${part.name} is too big to ask the free Overpass service for in one go. Choose a smaller study area — a state or region loads it.`;
+  notify.warn(message, {
+    duration: 0,
+    actions: [
+      ...(lighter ? [{ label: `Add ${lighter.name} instead`, run: () => addDataset(lighter) }] : []),
+      { label: 'Choose a smaller area', run: () => setTool('area') },
+      { label: 'Dismiss', run: () => {} },
+    ],
+  });
+}
+
 async function addDataset(dataset, { quiet = false } = {}) {
   const area = state.studyArea;
   if (!area) {
@@ -374,25 +404,20 @@ async function addDataset(dataset, { quiet = false } = {}) {
   }
   if (inflight.has(dataset.slug)) return;
 
-  const parts = areaParts(area);
+  const areaPartsList = areaParts(area);
+  const parts = [];
 
   // The size limit is about not asking a free public service for a whole
   // state — so it only applies if we would actually have to ask, and it
   // applies to each area separately, because each is its own query. A
-  // download already sitting in a cache costs Overpass nothing to serve.
-  for (const part of parts) {
+  // download already sitting in a cache costs Overpass nothing to serve, and
+  // a country whose states are stored is fetched as those states.
+  for (const part of areaPartsList) {
     const size = checkSize(dataset, part.bbox);
-    if (size.ok) continue;
-    if (await isDatasetCached(dataset, part.bbox)) continue;
-    // "Zoom in" is only half the answer, and it is the half that makes the
-    // map smaller than the user wanted. The other half is that this area can
-    // be fetched once, in pieces, into the database — after which it loads at
-    // full size. Naming the command with this area already in it is the
-    // difference between advice and something you can act on.
-    notify.warn(
-      `${parts.length > 1 ? `<b>${part.name}</b>: ` : ''}${size.reason}<br /><br />Or fetch ${part.name} into the offline database once — it is downloaded in pieces, so the limit does not apply, and it loads instantly from then on:<br /><code>npm run prefetch -- --areas "${prefetchName(part)}" --tile</code>`,
-      { duration: 16000 },
-    );
+    if (size.ok || await isDatasetCached(dataset, part.bbox)) { parts.push(part); continue; }
+    const pieces = dataset.heavy ? null : await piecesFor(dataset, part);
+    if (pieces) { parts.push(...pieces); continue; }
+    refuseTooBig(dataset, part, areaPartsList.length > 1);
     return;
   }
 
@@ -554,7 +579,7 @@ async function handleFiles(files) {
   for (const file of files) {
     const status = notify.busy(`Reading <b>${file.name}</b>…`);
     try {
-      const { geojson, name, format } = await parseGeoFile(file);
+      const { geojson, name, format, repaired } = await parseGeoFile(file);
       const count = featureCount(geojson);
       if (!count) throw new Error('That file contained no features.');
       const layer = addVectorLayer({
@@ -567,7 +592,8 @@ async function handleFiles(files) {
       renderElements();
       const bbox = bboxOf(geojson);
       if (bbox) flyToBounds(boundsFromBbox(bbox));
-      status.update(`<b>${name}</b> added — ${formatNumber(count, 0)} features from ${format}.`, { tone: 'ok', duration: 4500 });
+      const fixed = repaired ? ` ${formatNumber(repaired, 0)} shape${repaired === 1 ? '' : 's'} with topology errors repaired.` : '';
+      status.update(`<b>${name}</b> added — ${formatNumber(count, 0)} features from ${format}.${fixed}`, { tone: 'ok', duration: fixed ? 6500 : 4500 });
       hint(`Open <b>Layers</b> to restyle “${layer.name}”.`);
     } catch (err) {
       status.update(err.message ?? 'Could not read that file.', { tone: 'error', duration: 8000 });

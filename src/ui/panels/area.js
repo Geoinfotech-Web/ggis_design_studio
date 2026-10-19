@@ -25,14 +25,17 @@ import {
 import { flyToBounds } from '../../core/map.js';
 import { boundsFromBbox, formatArea, areaKm2, bboxOf, centroidOf } from '../../core/geo.js';
 import { parseGeoFile } from '../../data/upload.js';
+import { clipAreaToLand } from '../../data/land.js';
+import { worldArea, listWorld } from '../../data/world.js';
+import { placeSearch } from '../place-search.js';
 import { syncAutoText } from '../../templates/apply.js';
 import { renderElements, hint } from '../artboard.js';
-import { head, section, labelled, select, textInput, button, stack, empty, miniBtn, seg } from '../controls.js';
+import { head, section, labelled, select, button, stack, empty, miniBtn, seg } from '../controls.js';
 import { setTool } from '../tool.js';
 import { uiIcon } from '../ui-icons.js';
 
 let pane;
-let form = { level: 'state', country: 'ng', name: 'Rivers', zone: 'ss', parentState: 'Rivers', lga: '' };
+let form = { level: 'state', country: 'ng', name: 'Rivers', zone: 'ss', parentState: 'Rivers', parentWorldId: null, lga: '' };
 let busy = false;
 // Where the boundary comes from: the open administrative boundaries, or a
 // file of the user's own.
@@ -90,6 +93,29 @@ async function loadLgaList(stateName) {
   }
 }
 
+/**
+ * The districts of a region from the world boundaries — instant, and the
+ * route for every country other than Nigeria, whose LGAs still come from
+ * OpenStreetMap so they line up with the basemap.
+ */
+async function loadWorldLgaList(stateName, parentId) {
+  if (!stateName || !parentId || lgaLoading === stateName) return;
+  lgaLoading = stateName;
+  render();
+  try {
+    const rows = await listWorld({ parent: parentId });
+    if (!rows.length) throw new Error(`No districts are recorded inside ${stateName}.`);
+    const units = rows.map((r) => ({ name: r.name, areaKm2: r.areaKm2, worldId: r.id }));
+    lgaCache.set(stateName, { units });
+    if (!units.some((u) => u.name === form.lga)) form.lga = units[0].name;
+  } catch (err) {
+    lgaCache.set(stateName, { units: [], error: err.message });
+  } finally {
+    lgaLoading = null;
+    render();
+  }
+}
+
 /** Put the chosen LGA on the map, using the polygon already in hand. */
 async function loadLga({ replace = false } = {}) {
   const entry = lgaCache.get(form.parentState);
@@ -98,9 +124,12 @@ async function loadLga({ replace = false } = {}) {
     notify.warn('Pick a state, then choose an LGA from the list.');
     return;
   }
+  // A district from the world list is one row away on the cache server.
+  if (unit.worldId) return loadWorldUnit(unit.worldId, { replace });
   // No lookup needed — the outline came back with the list, which is why the
-  // list is worth fetching whole rather than one name at a time.
-  finish(unit, { replace });
+  // list is worth fetching whole rather than one name at a time. A coastal
+  // LGA's outline can run out to sea, so it is trimmed to the coast first.
+  finish(await clipAreaToLand(unit), { replace });
 }
 
 /* ------------------------------------------------------------------ */
@@ -163,6 +192,34 @@ function finish(area, { replace = false } = {}) {
   return true;
 }
 
+/** Put one place from the world boundaries on the map. */
+async function loadWorldUnit(id, { replace = false } = {}) {
+  if (busy) return;
+  busy = true;
+  render();
+  const status = notify.busy('Loading the boundary…');
+  try {
+    const area = await worldArea(id);
+    status.close();
+    busy = false;
+    finish(area, { replace });
+  } catch (err) {
+    status.update(err.message ?? 'Could not load that boundary.', { tone: 'error', duration: 7000 });
+  } finally {
+    busy = false;
+    render();
+  }
+}
+
+/** A suggestion from a search box: a world unit, or an OpenStreetMap place by its full name. */
+function pickPlace(choice, { replace = false } = {}) {
+  if (choice.kind === 'world') return loadWorldUnit(choice.id, { replace });
+  form.name = choice.label;
+  const level = form.level;
+  form.level = 'custom';
+  return loadBoundary({ replace }).finally(() => { form.level = level; render(); });
+}
+
 /**
  * Look a place up and put it on the map.
  * @param {{replace?: boolean}} [opts]  replace:true swaps out everything
@@ -171,10 +228,12 @@ function finish(area, { replace = false } = {}) {
  */
 async function loadBoundary({ replace = false } = {}) {
   if (busy) return;
+  // Anywhere in the world has no level picker: whatever was typed is a place.
+  const anywhere = form.country === '';
   // Zones are assembled from several lookups and LGAs are already in hand, so
   // each has its own path; only the plain single-name lookup runs below.
-  if (form.level === 'zone') return loadZone({ replace });
-  if (form.level === 'lga') return loadLga({ replace });
+  if (!anywhere && form.level === 'zone') return loadZone({ replace });
+  if (!anywhere && form.level === 'lga') return loadLga({ replace });
 
   busy = true;
   render();
@@ -182,7 +241,7 @@ async function loadBoundary({ replace = false } = {}) {
 
   try {
     const area = await lookupBoundary({
-      level: form.level,
+      level: anywhere ? 'custom' : form.level,
       name: form.name,
       countryCode: form.country,
       countryName: countryName(),
@@ -208,7 +267,7 @@ async function loadBoundary({ replace = false } = {}) {
       { tone: 'ok', duration: 4200 },
     );
     hint(n > 1
-      ? 'Data and analysis now cover every area on this list. Each one is fetched separately, then merged.'
+      ? 'Data now covers every area on this list. Each one is fetched separately, then merged.'
       : state.mapStarted
         ? 'Now open <b>Data</b> to add roads, rivers or buildings inside this area.'
         : 'Study area set. Press <b>Continue to Start map</b> when you are ready.');
@@ -275,40 +334,78 @@ function lgaControls() {
         render();
         loadLgaList(value);
       })
-    : textInput(form.parentState, (value) => { form.parentState = value; }, {
+    : placeSearch({
+        value: form.parentState,
+        country: form.country,
+        level: 'state',
         placeholder: 'e.g. Ashanti',
+        onText: (value) => { form.parentState = value; form.parentWorldId = null; },
+        onPick: (choice) => {
+          if (choice.kind !== 'world') return;
+          form.parentState = choice.name;
+          form.parentWorldId = choice.id;
+          form.lga = '';
+          loadWorldLgaList(choice.name, choice.id);
+        },
+        onSubmit: (value) => { form.parentState = value; loadLgaList(value); },
       });
 
-  const rows = [labelled('State', stateField, 'The LGA list is read from this state\'s boundaries.')];
+  const rows = [labelled(states ? 'State' : 'Region', stateField, states
+    ? 'The LGA list is read from this state\'s boundaries.'
+    : 'Type and pick the region; its districts are listed below.')];
 
   if (loading) {
     rows.push(el('div', {
       style: { display: 'flex', alignItems: 'center', gap: '7px', fontSize: '11.5px', color: 'var(--ink-soft)' },
     }, [el('span.spinner.spinner--ink'), el('span', { text: `Reading the LGAs of ${form.parentState}…` })]));
   } else if (entry?.units?.length) {
-    rows.push(labelled('LGA', select(
+    rows.push(labelled(states ? 'LGA' : 'District', select(
       entry.units.map((u) => ({ value: u.name, label: u.name })),
       form.lga || entry.units[0].name,
       (value) => { form.lga = value; render(); },
     ), (() => {
       const unit = entry.units.find((u) => u.name === (form.lga || entry.units[0].name));
-      return `${entry.units.length} LGAs in ${form.parentState}${unit ? ` · ${unit.name} is ${formatArea(unit.areaKm2)}` : ''}`;
+      return `${entry.units.length} ${states ? 'LGAs' : 'districts'} in ${form.parentState}${unit ? ` · ${unit.name} is ${formatArea(unit.areaKm2)}` : ''}`;
     })()));
   } else if (entry?.error) {
     rows.push(el('p', {
       style: { margin: 0, fontSize: '10.5px', color: 'var(--ember)', lineHeight: '1.45' },
       text: entry.error,
     }));
-    rows.push(button('Try again', () => { lgaCache.delete(form.parentState); loadLgaList(form.parentState); }, 'ghost', {
+    rows.push(button('Try again', () => { lgaCache.delete(form.parentState); listLgas(); }, 'ghost', {
       style: { width: '100%' },
     }));
   } else {
-    rows.push(button(`List the LGAs of ${form.parentState}`, () => loadLgaList(form.parentState), 'soft', {
+    rows.push(button(`List the ${states ? 'LGAs' : 'districts'} of ${form.parentState || 'this region'}`, listLgas, 'soft', {
       style: { width: '100%' },
     }));
   }
 
   return rows;
+}
+
+/** The district list for the chosen region, from whichever source has it. */
+function listLgas() {
+  if (form.parentWorldId && form.country !== 'ng') return loadWorldLgaList(form.parentState, form.parentWorldId);
+  return loadLgaList(form.parentState);
+}
+
+/**
+ * Anywhere in the world: one box, every country, region and district on
+ * Earth, plus OpenStreetMap's towns and named places.
+ */
+function worldControls() {
+  return [
+    labelled('Search', placeSearch({
+      value: form.name,
+      country: '',
+      osm: true,
+      placeholder: 'Country, state, district, city or place',
+      onText: (value) => { form.name = value; },
+      onPick: (choice) => pickPlace(choice),
+      onSubmit: () => loadBoundary(),
+    }), 'Start typing — suggestions appear as you go. "Ikeja, Lagos" narrows by region or country.'),
+  ];
 }
 
 /** Everything else: one name, typed or picked. */
@@ -323,12 +420,18 @@ function nameControl() {
     custom: 'e.g. Yankari National Park',
   }[form.level] ?? 'Place name';
 
-  const input = textInput(form.name, (value) => { form.name = value; }, {
+  // Regions come from the world boundaries; towns and named places from
+  // OpenStreetMap as well, since they are not administrative units.
+  return placeSearch({
+    value: form.name,
+    country: form.country,
+    level: form.level === 'state' ? 'state' : '',
+    osm: form.level !== 'state',
     placeholder,
-    disabled: form.level === 'country' ? true : null,
+    onText: (value) => { form.name = value; },
+    onPick: (choice) => pickPlace(choice),
+    onSubmit: () => loadBoundary(),
   });
-  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') loadBoundary(); });
-  return input;
 }
 
 /** One row of the list: what it is, how big, and how to get rid of it. */
@@ -464,16 +567,34 @@ export function render() {
 
   const has = studyAreas().length > 0;
   const levels = adminLevelsFor(form.country);
+  const anywhere = form.country === '';
+  const countryField = () => labelled('Country', select(
+    COUNTRIES.map((c) => ({ value: c.code, label: c.name })),
+    form.country,
+    (value) => {
+      form.country = value;
+      form.parentWorldId = null;
+      // Nigerian names make no sense as defaults anywhere else.
+      if (value !== 'ng' && NIGERIA_STATES.includes(form.name)) form.name = '';
+      if (value !== 'ng' && NIGERIA_STATES.includes(form.parentState)) form.parentState = '';
+      if (value === 'ng' && !form.parentState) form.parentState = 'Rivers';
+      if (value === 'ng' && form.level === 'state' && !NIGERIA_STATES.includes(form.name)) form.name = 'Rivers';
+      // Zones are Nigeria's; leaving the country has to leave the level too.
+      if (!adminLevelsFor(value).some((l) => l.id === form.level)) form.level = 'state';
+      render();
+    },
+  ));
 
   // Zones and LGAs are not one lookup, so the button says what it will do.
   const verb = has ? 'Add' : 'Load';
   const label = busy || lgaLoading
     ? 'Working…'
+    : anywhere ? (has ? 'Add this place' : 'Search and load')
     : form.level === 'zone' ? `${verb} this zone`
       : form.level === 'lga' ? `${verb} this LGA`
         : has ? 'Add this area' : 'Load boundary';
 
-  const ready = form.level !== 'lga' || Boolean(lgaCache.get(form.parentState)?.units?.length);
+  const ready = anywhere || form.level !== 'lga' || Boolean(lgaCache.get(form.parentState)?.units?.length);
   const loadBtn = button(label, () => loadBoundary(), 'primary', {
     style: { width: '100%' },
     disabled: busy || lgaLoading || !ready ? true : null,
@@ -489,7 +610,15 @@ export function render() {
       (value) => { source = value; render(); },
     )]),
     source === 'upload' ? section('Your own boundary', stack(uploadControls(has))) : null,
-    source === 'upload' ? null : section('Find a place', stack([
+    source === 'upload' ? null : section('Find a place', stack(anywhere ? [
+      countryField(),
+      ...worldControls(),
+      loadBtn,
+      has ? el('p', {
+        style: { margin: 0, fontSize: '10.5px', color: 'var(--ink-faint)', lineHeight: '1.45' },
+        text: 'Added alongside the areas below. Data and every printed figure cover all of them.',
+      }) : null,
+    ] : [
       labelled('Level', select(
         levels.map((l) => ({ value: l.id, label: l.label })),
         form.level,
@@ -502,16 +631,7 @@ export function render() {
           if (value === 'lga') loadLgaList(form.parentState);
         },
       ), levels.find((l) => l.id === form.level)?.hint),
-      labelled('Country', select(
-        COUNTRIES.map((c) => ({ value: c.code, label: c.name })),
-        form.country,
-        (value) => {
-          form.country = value;
-          // Zones are Nigeria's; leaving the country has to leave the level too.
-          if (!adminLevelsFor(value).some((l) => l.id === form.level)) form.level = 'state';
-          render();
-        },
-      )),
+      countryField(),
       ...(form.level === 'zone' ? zoneControls()
         : form.level === 'lga' ? lgaControls()
           : form.level === 'country' ? []
@@ -521,7 +641,7 @@ export function render() {
       // saying plainly then: the button above no longer replaces anything.
       has ? el('p', {
         style: { margin: 0, fontSize: '10.5px', color: 'var(--ink-faint)', lineHeight: '1.45' },
-        text: 'Added alongside the areas below. Data, analysis and every printed figure cover all of them.',
+        text: 'Added alongside the areas below. Data and every printed figure cover all of them.',
       }) : null,
       has ? button('Replace instead', () => loadBoundary({ replace: true }), 'ghost', {
         style: { width: '100%' },
