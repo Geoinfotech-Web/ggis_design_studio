@@ -1,0 +1,27 @@
+# GIS Design Studio — the web front end.
+#
+# Builds the browser app with Vite, then serves it from nginx together with
+# the routes to the account and cache services (deploy/nginx.conf).
+#
+#   docker build -f deploy/Dockerfile.web \
+#     --build-arg VITE_GOOGLE_CLIENT_ID=xxxx.apps.googleusercontent.com -t gis-studio-web .
+#
+# VITE_* values are baked into the JavaScript at build time — changing one
+# means rebuilding this image. None of them is a secret.
+
+FROM node:24-alpine AS build
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY . .
+ARG VITE_GOOGLE_CLIENT_ID=""
+ARG VITE_AI_ENDPOINT=""
+ENV VITE_GOOGLE_CLIENT_ID=$VITE_GOOGLE_CLIENT_ID \
+    VITE_AI_ENDPOINT=$VITE_AI_ENDPOINT
+RUN npm run build
+
+FROM nginx:1.27-alpine
+COPY deploy/nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=build /app/dist /usr/share/nginx/html
+EXPOSE 80
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 CMD wget -qO- http://localhost/ >/dev/null || exit 1

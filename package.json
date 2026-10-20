@@ -1,9 +1,9 @@
 {
   "name": "gis-design-studio",
-  "version": "3.0.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Template-based map design studio — Canva-style cartography with OSM data and Earth Engine analysis",
+  "description": "GIS Design Studio v1 — template-based, print-ready map design with worldwide OpenStreetMap boundaries and open data",
   "scripts": {
     "dev": "vite",
     "build": "vite build",

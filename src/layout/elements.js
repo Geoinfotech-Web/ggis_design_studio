@@ -899,7 +899,7 @@ export const ELEMENT_TYPES = {
   },
 
   stats: {
-    label: 'Key figures', icon: '◫', hint: 'Study area, feature counts, analysis results',
+    label: 'Key figures', icon: '◫', hint: 'Study area and feature counts',
     inspect: ['heading', 'rows', 'type', 'chrome'],
     rows: () => statsRows(),
     defaults: { x: 68, y: 72, w: 26, h: 20, text: 'Key figures' },

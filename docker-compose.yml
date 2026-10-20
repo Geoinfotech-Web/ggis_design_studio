@@ -1,17 +1,57 @@
-# The geodata service.
+# GIS Design Studio — the whole stack.
 #
-#   docker compose up -d cache          serve the database on :8788
+#   docker compose up -d                the studio on :8080 (web + accounts + cache)
+#   docker compose up -d cache          only the geodata database, on :8788
 #   docker compose run --rm fetch       download the Nigeria extract
 #   docker compose run --rm import --nigeria --no-heavy
 #   docker compose run --rm backup      write a portable copy to ./server/data
 #
-# The database lives on the `geodata` volume rather than in the repository or
-# the image, because it is 145 MB and rebuilt often. `./server/data` is bind
-# mounted wherever a command needs to read an extract or hand a file back.
+# The databases live on volumes rather than in the repository or the images:
+#   geodata   geodata.db (open-data cache) and world.db (world boundaries)
+#   accounts  accounts.db (users, sessions, saved projects) — back this one up
+# `./server/data` is bind mounted wherever a command needs to read an extract
+# or hand a file back. See docs/DEPLOYMENT.md.
 
 name: gis-design-studio
 
 services:
+  # The studio itself: the built app plus routes to the two APIs below.
+  # Put HTTPS in front of it (see docs/DEPLOYMENT.md) — sign-in needs it.
+  web:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.web
+      args:
+        VITE_GOOGLE_CLIENT_ID: ${VITE_GOOGLE_CLIENT_ID:-}
+        VITE_AI_ENDPOINT: ${VITE_AI_ENDPOINT:-}
+    image: gis-studio-web:latest
+    container_name: gis-studio-web
+    restart: unless-stopped
+    ports:
+      - "${WEB_PORT:-8080}:80"
+    depends_on:
+      - accounts
+      - cache
+
+  # Accounts and saved maps (server/account-server.mjs).
+  accounts:
+    build: .
+    image: gis-geodata:latest
+    container_name: gis-accounts
+    restart: unless-stopped
+    command: ["node", "server/account-server.mjs"]
+    environment:
+      PORT: 8789
+      ACCOUNTS_DB: /data/accounts.db
+      GOOGLE_CLIENT_ID: ${VITE_GOOGLE_CLIENT_ID:-}
+      # Served over HTTPS in production: the session cookie must be Secure.
+      COOKIE_SECURE: ${COOKIE_SECURE:-1}
+      # Requests arrive through the web container, which sets X-Forwarded-For.
+      TRUST_PROXY: 1
+    volumes:
+      # /data is created in the image for the unprivileged node user.
+      - accounts:/data
+
   # The one long-running service: the studio's cache, over HTTP.
   cache:
     build: .
@@ -25,6 +65,8 @@ services:
       # here, so in development this is only a fallback for direct calls.
       ALLOW_ORIGIN: ${ALLOW_ORIGIN:-http://localhost:5173}
       CACHE_BUDGET: ${CACHE_BUDGET:-8589934592}
+      # World boundaries for the study-area search (server/import-world.mjs).
+      WORLD_DB: /data/world.db
     volumes:
       - geodata:/data
 
@@ -97,6 +139,37 @@ services:
       - ./server/data:/out
     entrypoint: ["node", "server/backup-db.mjs", "/out/geodata-backup.db"]
 
+  # Put the world boundaries database on the volume. Copy world.db (built with
+  # npm run extract:world + import:world, or copied from another machine)
+  # into ./server/data first, then:  docker compose run --rm restore-world
+  # Restart the cache service afterwards so it opens the new file.
+  restore-world:
+    build: .
+    profiles: ["tools"]
+    healthcheck:
+      disable: true
+    volumes:
+      - geodata:/data
+      - ./server/data:/in:ro
+    entrypoint: ["sh", "-c"]
+    command: >
+      'test -f /in/world.db || { echo "Put world.db in ./server/data first."; exit 1; };
+       cp /in/world.db /data/world.db.tmp && mv /data/world.db.tmp /data/world.db;
+       echo "Installed $(du -h /data/world.db | cut -f1) world boundaries. Restart the cache service."'
+
+  # Copy the accounts database (users + saved maps) out to ./server/data.
+  # This is the one database that cannot be rebuilt — run it daily:
+  #   docker compose run --rm backup-accounts
+  backup-accounts:
+    build: .
+    profiles: ["tools"]
+    healthcheck:
+      disable: true
+    volumes:
+      - accounts:/data
+      - ./server/data:/out
+    entrypoint: ["node", "server/backup-sqlite.mjs", "/data/accounts.db", "/out/accounts-backup.db"]
+
   # Load a copy someone handed you. Overwrites whatever is on the volume.
   restore:
     build: .
@@ -117,3 +190,4 @@ services:
 
 volumes:
   geodata:
+  accounts:

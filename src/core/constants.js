@@ -3,7 +3,7 @@
 export const APP = {
   name: 'GIS Design Studio',
   org: 'Geoinfotech Resources Limited',
-  version: '3.0.0',
+  version: '1.0.0',
 };
 
 /* ------------------------------------------------------------------ */

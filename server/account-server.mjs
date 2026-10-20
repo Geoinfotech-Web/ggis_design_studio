@@ -193,7 +193,16 @@ function throttled(key, limit = 8, windowMs = 60000) {
   attempts.set(key, recent);
   return recent.length > limit;
 }
-const clientIp = (req) => String(req.headers['x-forwarded-for'] ?? req.socket.remoteAddress ?? '').split(',')[0].trim();
+/**
+ * The caller's address, for the sign-in rate limits. X-Forwarded-For is only
+ * believed behind a reverse proxy we run (TRUST_PROXY=1): exposed directly,
+ * anyone could send a fresh fake address with every attempt and never be
+ * throttled.
+ */
+const TRUST_PROXY = /^(1|true|yes)$/i.test(process.env.TRUST_PROXY ?? '');
+const clientIp = (req) => (TRUST_PROXY
+  ? String(req.headers['x-forwarded-for'] ?? req.socket.remoteAddress ?? '').split(',')[0].trim()
+  : String(req.socket.remoteAddress ?? ''));
 
 /* ------------------------------------------------------------------ */
 /* Google ID tokens                                                    */

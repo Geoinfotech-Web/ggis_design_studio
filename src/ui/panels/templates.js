@@ -169,7 +169,7 @@ function lookControls() {
       Object.entries(MAP_LOOKS).map(([value, l]) => ({ value, label: l.label })),
       look.filter,
       (value) => setLook({ filter: value }),
-    ), hueSafe(look.filter) ? '' : 'Heads up: this filter recolours your data and analysis layers too, so they will no longer match their legend.'),
+    ), hueSafe(look.filter) ? '' : 'Heads up: this filter recolours your data layers too, so they will no longer match their legend.'),
     labelled('Paper texture', select(
       Object.entries(MAP_TEXTURES).map(([value, t]) => ({ value, label: t.label })),
       look.texture,

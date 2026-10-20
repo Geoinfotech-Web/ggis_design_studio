@@ -3,7 +3,8 @@
  *
  *   ANTHROPIC_API_KEY=sk-ant-... node server/ai-backend.mjs
  *
- * Then paste http://localhost:8787 into Analysis → Assistant → Backend URL.
+ * Then paste http://localhost:8787 into the AI assistant panel → Backend URL,
+ * or set VITE_AI_ENDPOINT so the studio uses it automatically.
  *
  * The point of this file is that the API key lives here, in your process
  * environment, and never reaches the browser. The studio sends only the
@@ -15,6 +16,8 @@ import { createServer } from 'node:http';
 import Anthropic from '@anthropic-ai/sdk';
 
 const PORT = Number(process.env.PORT ?? 8787);
+/** The model replies come from. Override with AI_MODEL if needed. */
+const MODEL = process.env.AI_MODEL ?? 'claude-opus-5-5';
 const ORIGIN = process.env.ALLOW_ORIGIN ?? 'http://localhost:5173';
 
 /**
@@ -89,7 +92,7 @@ createServer(async (req, res) => {
     return send(res, 200, {
       ok: true,
       mode: HAS_KEY ? 'claude' : 'no-key',
-      model: HAS_KEY ? 'claude-opus-5' : null,
+      model: HAS_KEY ? MODEL : null,
       origin: ORIGIN,
     });
   }
@@ -116,13 +119,12 @@ createServer(async (req, res) => {
 
   try {
     const response = await client.beta.messages.create({
-      model: 'claude-opus-5',
+      model: MODEL,
       // Replies are a few paragraphs; this leaves ample room for thinking
       // plus the answer without risking an HTTP timeout on a non-streaming call.
       max_tokens: 8000,
-      // Claude Opus 5 thinks by default. Low effort keeps a short explanatory
-      // task quick and cheap rather than turning thinking off, which on this
-      // model can leak internal tags into the visible reply.
+      // Claude Opus 5.5 always thinks; effort is the only control. Low effort
+      // keeps a short explanatory task quick and cheap.
       output_config: { effort: 'low' },
       betas: ['server-side-fallback-2026-07-01'],
       fallbacks: 'default',
@@ -162,6 +164,6 @@ createServer(async (req, res) => {
 }).listen(PORT, () => {
   console.log(`Assistant backend on http://localhost:${PORT}  (allowing ${ORIGIN})`);
   console.log(HAS_KEY
-    ? 'Credential found — replies come from claude-opus-5.'
+    ? `Credential found — replies come from ${MODEL}.`
     : 'No ANTHROPIC_API_KEY — serving composed summaries. Restart with a key for real discussion.');
 });

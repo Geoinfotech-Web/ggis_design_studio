@@ -1,0 +1,15 @@
+# Build context for deploy/Dockerfile.web (BuildKit reads this file in place
+# of the root .dockerignore). Unlike the data image, the web build needs
+# src/assets — the landing image and contributor sheets.
+node_modules
+dist
+.git
+.vite
+*.log
+.env
+.env.*
+!.env.example
+server/data
+legacy
+design-export
+.claude

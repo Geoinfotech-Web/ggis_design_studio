@@ -130,7 +130,7 @@ const hostOf = (url) => { try { return new URL(url).host; } catch { return url; 
  * which runs this same module — has to introduce itself explicitly.
  */
 const IDENTITY = typeof window === 'undefined'
-  ? { 'User-Agent': 'gis-design-studio/3.0 (+https://github.com/JohnEdet12/gis-design-studio)' }
+  ? { 'User-Agent': 'gis-design-studio/1.0 (+https://github.com/Geoinfotech-Web/ggis_design_studio)' }
   : {};
 
 /**
