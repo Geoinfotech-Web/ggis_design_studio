@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "GIS Design Studio v1 — template-based, print-ready map design with worldwide OpenStreetMap boundaries and open data",
+  "description": "Mappix Studio v1 — template-based, print-ready map design with worldwide OpenStreetMap boundaries and open data",
   "scripts": {
     "dev": "vite",
     "build": "vite build",

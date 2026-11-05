@@ -1,4 +1,4 @@
-# GIS Design Studio — the web front end.
+# Mappix Studio — the web front end.
 #
 # Builds the browser app with Vite, then serves it from nginx together with
 # the routes to the account and cache services (deploy/nginx.conf).

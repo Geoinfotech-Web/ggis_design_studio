@@ -1,6 +1,6 @@
-# Handover to the web team — GIS Design Studio v1
+# Handover to the web team — Mappix Studio v1
 
-This is the first release (**v1.0.0**) of GIS Design Studio. The application
+This is the first release (**v1.0.0**) of Mappix Studio. The application
 works end to end on a developer machine. This document says what is finished,
 what the web team needs to do to put it live, and what is still left to build.
 
@@ -60,7 +60,7 @@ In Google Cloud Console → APIs & Services:
 1. **Credentials → the OAuth client → Authorised JavaScript origins**: add
    `https://<your-domain>` (keep `http://localhost:5173` for development).
 2. **OAuth consent screen**:
-   - Set the **App name to "GIS Design Studio"**. The existing client was
+   - Set the **App name to "Mappix Studio"**. The existing client was
      shown to users as *"Security NGA"* during testing; that name comes from
      the consent screen and must be corrected.
    - Add the app logo, the support email, and the **home page, privacy

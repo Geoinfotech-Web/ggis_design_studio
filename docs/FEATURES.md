@@ -1,4 +1,4 @@
-# Features — GIS Design Studio v1
+# Features — Mappix Studio v1
 
 Everything the studio does, in detail. For a short overview see the
 [README](../README.md); for how to use it, the [user guide](USER-GUIDE.md).

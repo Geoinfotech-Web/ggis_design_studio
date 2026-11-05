@@ -1,4 +1,4 @@
-# GIS Design Studio — the whole stack.
+# Mappix Studio — the whole stack.
 #
 #   docker compose up -d                the studio on :8080 (web + accounts + cache)
 #   docker compose up -d cache          only the geodata database, on :8788

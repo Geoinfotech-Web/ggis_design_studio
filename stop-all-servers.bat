@@ -1,7 +1,7 @@
 @echo off
 title Stop all local servers
-REM Stops the GIS Design Studio servers and the Crime Dashboard service.
-REM   GIS Design Studio : Vite 5173, cache server 8788, AI backend 8787
+REM Stops the Mappix Studio servers and the Crime Dashboard service.
+REM   Mappix Studio : Vite 5173, cache server 8788, AI backend 8787
 REM   Crime Dashboard   : dev_server 8085, supervisor 8086,
 REM                       scheduled task "CrimeDashboard-Localhost" (disabled so it cannot restart)
 

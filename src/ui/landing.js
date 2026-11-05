@@ -7,15 +7,14 @@
  * sign-in, where they are part of making a map rather than a brochure for it.
  */
 
+import { brandLogo } from './brand.js';
 import { $, el, fill } from '../core/dom.js';
-import { APP } from '../core/constants.js';
 import { openAuthModal } from './auth-modal.js';
 import { themeToggle } from './theme.js';
 import { sheetUrl } from './preview.js';
 
 let hooks = {};
 
-const MARK = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2zM9 4v14M15 6v14"/></svg>';
 
 /**
  * The picture: a real sheet by a contributor, not an illustration of one.
@@ -61,8 +60,7 @@ export function render() {
   if (!root) return;
   fill(root, [
     el('header.land-bar', {}, [
-      el('span.land-mark', { html: MARK }),
-      el('span.land-wordmark', { text: APP.name }),
+      brandLogo({ size: 30 }),
       el('span.land-spacer'),
       themeToggle(),
       authButton('Sign in', 'signin', 'land-btn.land-btn--quiet'),

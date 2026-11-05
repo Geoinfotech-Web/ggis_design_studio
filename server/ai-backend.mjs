@@ -1,5 +1,5 @@
 /**
- * Reference assistant backend for GIS Design Studio.
+ * Reference assistant backend for Mappix Studio.
  *
  *   ANTHROPIC_API_KEY=sk-ant-... node server/ai-backend.mjs
  *

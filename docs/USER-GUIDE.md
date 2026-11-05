@@ -1,4 +1,4 @@
-# User guide — making a map with GIS Design Studio
+# User guide — making a map with Mappix Studio
 
 A map is made in five steps, shown across the top of the studio:
 **Study area → Start map → Data → Compose → Export.** A step that is not open

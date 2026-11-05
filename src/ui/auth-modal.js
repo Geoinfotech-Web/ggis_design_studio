@@ -5,6 +5,7 @@
  * on the same screen, and closing it puts you back exactly where you were.
  */
 
+import { brandLogo } from './brand.js';
 import { $, el, fill } from '../core/dom.js';
 import { signUp, signIn, signInWithGoogle } from '../core/auth.js';
 import { googleConfigured, renderGoogleButton } from '../core/google.js';
@@ -138,6 +139,7 @@ export function openAuthModal(mode, hooks) {
 
   const dialog = el('div.auth-dialog', { role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'auth-title' }, [
     closeBtn,
+    el('div.auth-brand', {}, [brandLogo({ size: 26 })]),
     el('h2#auth-title', { text: signingUp ? 'Create your account' : 'Welcome back' }),
     el('p.auth-sub', { text: signingUp ? 'Free to start. Your maps are saved as you work.' : 'Sign in to open your maps.' }),
     googleBlock(mode, hooks),

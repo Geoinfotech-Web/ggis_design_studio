@@ -1,7 +1,7 @@
 /** App-wide constants: basemaps, paper, fonts, palettes, geography presets. */
 
 export const APP = {
-  name: 'GIS Design Studio',
+  name: 'Mappix Studio',
   org: 'Geoinfotech Resources Limited',
   version: '1.0.0',
 };

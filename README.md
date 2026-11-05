@@ -1,4 +1,8 @@
-# GIS Design Studio — v1
+<p align="center"><img src="docs/assets/mappix-logo.png" alt="Mappix Studio" width="420"></p>
+
+# Mappix Studio — v1
+
+*(formerly GIS Design Studio)*
 
 Template-based map design for people who are not GIS specialists. Choose a
 study area anywhere in the world, start from a cartographic template, drop in

@@ -1,4 +1,4 @@
-# Deploying GIS Design Studio v1
+# Deploying Mappix Studio v1
 
 How to run the studio in production. For what is still outstanding before
 launch, see [HANDOVER.md](HANDOVER.md).

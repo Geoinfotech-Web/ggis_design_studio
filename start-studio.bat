@@ -1,5 +1,5 @@
 @echo off
-REM GIS Design Studio - one-click launcher
+REM Mappix Studio - one-click launcher
 REM Starts the geodata cache server (:8788) and the Vite dev server (:5173).
 REM Vite opens http://localhost:5173 in your browser automatically.
 

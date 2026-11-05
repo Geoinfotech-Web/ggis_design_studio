@@ -222,3 +222,6 @@
 }
 .lightbox-caption { display: flex; justify-content: space-between; gap: 14px; padding: 13px 16px; font-size: 12px; }
 .lightbox-caption span { color: #94a3b8; }
+
+/* Logo at the top of the sign-up / sign-in dialog */
+.auth-brand { display: flex; justify-content: center; margin: 2px 0 14px; }

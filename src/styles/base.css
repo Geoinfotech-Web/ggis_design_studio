@@ -268,3 +268,21 @@
 }
 .maplibregl-ctrl-attrib { font-size: 10px !important; }
 .maplibregl-ctrl-bottom-right { z-index: 5; }
+
+/* ---- Mappix Studio logo (ui/brand.js) --------------------------------- */
+.mx-mark { display: block; flex: none; }
+.mx-mark .mx-ink { fill: var(--ink); }
+.mx-mark .mx-blue { fill: #1667F4; }
+.mx-logo { --mx-size: 28px; display: inline-flex; align-items: center; gap: calc(var(--mx-size) * 0.42); color: var(--ink); }
+.mx-logo-mark { display: block; line-height: 0; }
+.mx-logo-word { display: inline-flex; flex-direction: column; line-height: 1; }
+.mx-logo-name {
+  font-family: 'Poppins', 'Source Sans 3', sans-serif; font-weight: 600;
+  font-size: calc(var(--mx-size) * 1.05); letter-spacing: -0.02em; line-height: 1;
+}
+.mx-logo-sub {
+  align-self: flex-end; margin-top: calc(var(--mx-size) * 0.06);
+  font-family: 'Poppins', 'Source Sans 3', sans-serif; font-weight: 500;
+  font-size: calc(var(--mx-size) * 0.24); letter-spacing: 0.34em; text-transform: uppercase;
+  margin-right: -0.34em;
+}

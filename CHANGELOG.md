@@ -1,11 +1,19 @@
 # Changelog
 
-All notable changes to GIS Design Studio. Versions follow
-[Semantic Versioning](https://semver.org).
+All notable changes to Mappix Studio (formerly GIS Design Studio). Versions
+follow [Semantic Versioning](https://semver.org).
+
+## Unreleased
+
+### Brand
+- Renamed to **Mappix Studio**, with the new Mappix logo on the landing page,
+  sign-in dialog, studio header, browser tab icon, home-screen icon and in
+  exported PDFs' metadata. Vector logo in `src/ui/brand.js` (light and dark
+  mode); static copies in `public/` and `docs/assets/`.
 
 ## 1.0.0 — first release (2026-10)
 
-The first released version of GIS Design Studio. (Development builds before
+The first released version of the studio, then called GIS Design Studio. (Development builds before
 this were labelled "v3" internally; v1.0.0 is the first public version.)
 
 ### Study area

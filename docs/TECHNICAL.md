@@ -1,4 +1,4 @@
-# Technical documentation — GIS Design Studio v1
+# Technical documentation — Mappix Studio v1
 
 How the code is organised and why. For running it in production see
 [DEPLOYMENT.md](DEPLOYMENT.md); for endpoints see [API.md](API.md).
