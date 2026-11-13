@@ -16,8 +16,8 @@ import { CONTRIBUTIONS, CONTRIBUTOR } from '../../data/contributions.js';
 import { templatePreview, sheetUrl } from '../preview.js';
 import { templateCard } from '../template-info.js';
 import { PAPER_SIZES, paperDimsLabel } from '../../core/constants.js';
-import { resizeSoon } from '../../core/map.js';
-import { formatArea } from '../../core/geo.js';
+import { resizeSoon, flyToBounds } from '../../core/map.js';
+import { formatArea, boundsFromBbox } from '../../core/geo.js';
 import { layoutArtboard, renderElements, hint } from '../artboard.js';
 import { head, section, pillRow, select, labelled, button, stack, seg } from '../controls.js';
 import { setTool } from '../tool.js';
@@ -63,11 +63,14 @@ function startMap(templateId, { page, label } = {}) {
   layoutArtboard();
   renderElements();
   resizeSoon(80);
+  // Fit the study area inside the new page frame, so the layout sits on the
+  // place the map is about — on a phone as much as on a laptop.
+  if (state.studyArea?.bbox) setTimeout(() => flyToBounds(boundsFromBbox(state.studyArea.bbox), { duration: 700 }), 140);
 
   notify.ok(`Started from <b>${label ?? tpl.name}</b>. Your study area is kept.`);
   if (!wasStarted) {
     setTool('data');
-    hint('Next: add <b>data</b> on the left. Everything on the page can be moved and restyled.', 6500);
+    hint('Next: add <b>data</b>. Everything on the page can be moved and restyled.', 6500);
   } else {
     render();
   }

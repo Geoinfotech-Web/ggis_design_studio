@@ -256,7 +256,7 @@ export function render() {
   alignHost = el('div');
 
   fill(pane, [
-    head('Elements', 'Everything on the page is a movable element. Drag on the canvas, fine-tune on the right.'),
+    head('Elements', 'Everything on the page is a movable element. Drag it on the page, then fine-tune it in the settings panel.'),
     section('Add to page', addGrid()),
     section('Align', alignHost),
     section('On this page', list.length

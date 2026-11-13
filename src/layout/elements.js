@@ -195,66 +195,171 @@ function headingHtml(text, style, u) {
 /* ------------------------------------------------------------------ */
 /* north arrow glyphs — one description, two renderers                 */
 /* ------------------------------------------------------------------ */
-const NORTH_SHAPES = {
-  arrow: {
-    ring: false,
-    polys: [{ pts: [[50, 4], [74, 86], [50, 66], [26, 86]], tone: 'solid' }],
-  },
-  needle: {
-    ring: false,
-    polys: [
-      { pts: [[50, 4], [66, 84], [50, 62]], tone: 'solid' },
-      { pts: [[50, 4], [34, 84], [50, 62]], tone: 'light' },
-    ],
-  },
-  compass: {
-    ring: true,
-    polys: [
-      { pts: [[8, 50], [50, 42], [92, 50], [50, 58]], tone: 'light' },
-      { pts: [[50, 6], [58, 50], [50, 94], [42, 50]], tone: 'solid' },
-    ],
-  },
+/*
+ * The families of north arrow a cartographer expects from QGIS and ArcGIS
+ * Pro — simple and split arrows, needles, chevrons, compass roses with and
+ * without cardinal letters, an arrow in a circle, a fletched arrow, a
+ * navigation pointer and an "N" on a staff. The geometry is drawn here, on a
+ * 100 × 100 box with north at the top; nothing is copied from either program.
+ *
+ * Each style is a list of parts, and the same list drives both renderers —
+ * SVG for the page on screen and Canvas for the export — so the printed
+ * arrow is the one previewed.
+ *
+ *   poly    { t: 'poly', pts, tone, w }     tone: solid | light | none
+ *   circle  { t: 'circle', r, tone, w, cx, cy }
+ *   line    { t: 'line', pts, w }
+ *   text    { t: 'text', x, y, text, size }
+ */
+const polar = (deg, r) => {
+  const a = ((deg - 90) * Math.PI) / 180;
+  return [50 + r * Math.cos(a), 50 + r * Math.sin(a)];
 };
+/** One compass point at `deg`, split down its middle into a dark and a light half. */
+const splitPoint = (deg, tip, waist) => [
+  { t: 'poly', pts: [polar(deg, tip), polar(deg + 90, waist), [50, 50]], tone: 'solid', w: 1.2 },
+  { t: 'poly', pts: [polar(deg, tip), polar(deg - 90, waist), [50, 50]], tone: 'light', w: 1.2 },
+];
+const LETTERS = (r, size) => [
+  { t: 'text', ...xy(polar(0, r)), text: 'N', size },
+  { t: 'text', ...xy(polar(90, r)), text: 'E', size: size * 0.8 },
+  { t: 'text', ...xy(polar(180, r)), text: 'S', size: size * 0.8 },
+  { t: 'text', ...xy(polar(270, r)), text: 'W', size: size * 0.8 },
+];
+function xy([x, y]) { return { x, y }; }
 
-const toneFill = (tone, color) => (tone === 'light' ? rgba(color, 0.24) : color);
+export const NORTH_STYLES = [
+  { id: 'arrow', label: 'Simple arrow', parts: [
+    { t: 'poly', pts: [[50, 4], [74, 86], [50, 66], [26, 86]], tone: 'solid' },
+  ] },
+  { id: 'classic', label: 'Split arrow', parts: [
+    { t: 'poly', pts: [[50, 4], [50, 74], [22, 94]], tone: 'solid' },
+    { t: 'poly', pts: [[50, 4], [78, 94], [50, 74]], tone: 'light' },
+  ] },
+  { id: 'needle', label: 'Half needle', parts: [
+    { t: 'poly', pts: [[50, 4], [66, 84], [50, 62]], tone: 'solid' },
+    { t: 'poly', pts: [[50, 4], [34, 84], [50, 62]], tone: 'light' },
+  ] },
+  { id: 'triangle', label: 'Triangle', parts: [
+    { t: 'poly', pts: [[50, 6], [80, 92], [20, 92]], tone: 'solid' },
+  ] },
+  { id: 'chevron', label: 'Chevron', parts: [
+    { t: 'poly', pts: [[50, 8], [86, 76], [72, 86], [50, 44], [28, 86], [14, 76]], tone: 'solid' },
+  ] },
+  { id: 'navigator', label: 'Navigation pointer', parts: [
+    { t: 'poly', pts: [[50, 6], [82, 90], [50, 72], [18, 90]], tone: 'light', w: 3.2 },
+  ] },
+  { id: 'circle-arrow', label: 'Arrow in circle', parts: [
+    { t: 'circle', r: 46, tone: 'none', w: 3 },
+    { t: 'poly', pts: [[50, 12], [67, 78], [50, 66], [33, 78]], tone: 'solid' },
+  ] },
+  { id: 'orienteering', label: 'Compass needle', parts: [
+    { t: 'circle', r: 46, tone: 'none', w: 3 },
+    { t: 'poly', pts: [[50, 9], [61, 50], [39, 50]], tone: 'solid' },
+    { t: 'poly', pts: [[50, 91], [61, 50], [39, 50]], tone: 'light' },
+    { t: 'circle', r: 3.5, tone: 'solid', w: 1 },
+  ] },
+  { id: 'compass', label: 'Compass (4-point)', parts: [
+    { t: 'circle', r: 47, tone: 'none', w: 3 },
+    { t: 'poly', pts: [[8, 50], [50, 42], [92, 50], [50, 58]], tone: 'light' },
+    { t: 'poly', pts: [[50, 6], [58, 50], [50, 94], [42, 50]], tone: 'solid' },
+  ] },
+  { id: 'star-letters', label: 'Star with N E S W', parts: [
+    ...[0, 90, 180, 270].flatMap((d) => splitPoint(d, 34, 8)),
+    ...LETTERS(44, 15),
+  ] },
+  { id: 'rose8', label: 'Compass rose (8-point)', parts: [
+    { t: 'circle', r: 46, tone: 'none', w: 2.2 },
+    ...[45, 135, 225, 315].flatMap((d) => splitPoint(d, 30, 7)),
+    ...[0, 90, 180, 270].flatMap((d) => splitPoint(d, 46, 10)),
+  ] },
+  { id: 'rose16', label: 'Ornate rose (16-point)', parts: [
+    { t: 'circle', r: 47, tone: 'none', w: 2 },
+    { t: 'circle', r: 40, tone: 'none', w: 1 },
+    ...[22.5, 67.5, 112.5, 157.5, 202.5, 247.5, 292.5, 337.5].flatMap((d) => splitPoint(d, 24, 5)),
+    ...[45, 135, 225, 315].flatMap((d) => splitPoint(d, 34, 7)),
+    ...[0, 90, 180, 270].flatMap((d) => splitPoint(d, 47, 9)),
+    { t: 'circle', r: 3, tone: 'solid', w: 1 },
+  ] },
+  { id: 'fletched', label: 'Fletched arrow', parts: [
+    { t: 'line', pts: [[50, 24], [50, 94]], w: 4 },
+    { t: 'poly', pts: [[50, 4], [64, 32], [50, 25], [36, 32]], tone: 'solid' },
+    { t: 'poly', pts: [[50, 76], [36, 96], [36, 86], [50, 68]], tone: 'solid', w: 1 },
+    { t: 'poly', pts: [[50, 76], [64, 96], [64, 86], [50, 68]], tone: 'light', w: 1 },
+  ] },
+  { id: 'n-staff', label: 'N on a staff', parts: [
+    { t: 'text', x: 50, y: 15, text: 'N', size: 26 },
+    { t: 'poly', pts: [[50, 32], [59, 50], [41, 50]], tone: 'solid' },
+    { t: 'line', pts: [[50, 48], [50, 96]], w: 3.5 },
+  ] },
+];
+const NORTH_BY_ID = Object.fromEntries(NORTH_STYLES.map((n) => [n.id, n]));
+/** Styles that already draw an "N" inside the glyph. */
+export const northDrawsLetter = (variant) => (NORTH_BY_ID[variant]?.parts ?? []).some((p) => p.t === 'text');
 
-function northSvg(variant, color, rotation) {
-  const shape = NORTH_SHAPES[variant] ?? NORTH_SHAPES.arrow;
-  const ring = shape.ring
-    ? `<circle cx="50" cy="50" r="47" fill="none" stroke="${color}" stroke-width="3"/>`
-    : '';
-  const polys = shape.polys.map((p) =>
-    `<polygon points="${p.pts.map(([x, y]) => `${x},${y}`).join(' ')}" fill="${toneFill(p.tone, color)}" stroke="${color}" stroke-width="1.6" stroke-linejoin="round"/>`).join('');
-  return `<svg viewBox="0 0 100 100" style="width:100%;height:100%;display:block;transform:rotate(${rotation}deg)">${ring}${polys}</svg>`;
+const toneFill = (tone, color) => (tone === 'light' ? rgba(color, 0.24) : tone === 'none' ? 'none' : color);
+const NORTH_FONT = "'Source Sans 3', 'Segoe UI', Arial, sans-serif";
+
+/** The arrow as SVG markup. Exported so the inspector's gallery shows the real thing. */
+export function northSvg(variant, color, rotation = 0) {
+  const shape = NORTH_BY_ID[variant] ?? NORTH_BY_ID.arrow;
+  const parts = shape.parts.map((p) => {
+    if (p.t === 'poly') return `<polygon points="${p.pts.map(([x, y]) => `${x.toFixed(2)},${y.toFixed(2)}`).join(' ')}" fill="${toneFill(p.tone, color)}" stroke="${color}" stroke-width="${p.w ?? 1.6}" stroke-linejoin="round"/>`;
+    if (p.t === 'circle') return `<circle cx="${p.cx ?? 50}" cy="${p.cy ?? 50}" r="${p.r}" fill="${toneFill(p.tone, color)}" stroke="${color}" stroke-width="${p.w ?? 1.6}"/>`;
+    if (p.t === 'line') return `<polyline points="${p.pts.map(([x, y]) => `${x},${y}`).join(' ')}" fill="none" stroke="${color}" stroke-width="${p.w ?? 2}" stroke-linecap="round"/>`;
+    if (p.t === 'text') return `<text x="${p.x.toFixed(2)}" y="${p.y.toFixed(2)}" font-size="${p.size}" font-weight="800" font-family="${NORTH_FONT.replace(/'/g, '&#39;')}" text-anchor="middle" dominant-baseline="central" fill="${color}">${p.text}</text>`;
+    return '';
+  }).join('');
+  return `<svg viewBox="0 0 100 100" style="width:100%;height:100%;display:block;overflow:visible;transform:rotate(${rotation}deg)">${parts}</svg>`;
 }
 
 function paintNorthGlyph(c, variant, color, cx, cy, side, rotation) {
-  const shape = NORTH_SHAPES[variant] ?? NORTH_SHAPES.arrow;
+  const shape = NORTH_BY_ID[variant] ?? NORTH_BY_ID.arrow;
   c.save();
   c.translate(cx, cy);
   c.rotate((rotation * Math.PI) / 180);
   c.scale(side / 100, side / 100);
   c.translate(-50, -50);
   c.lineJoin = 'round';
+  c.lineCap = 'round';
   c.strokeStyle = color;
-  c.lineWidth = 1.6;
-  if (shape.ring) {
-    c.beginPath();
-    c.arc(50, 50, 47, 0, Math.PI * 2);
-    c.lineWidth = 3;
-    c.stroke();
-    c.lineWidth = 1.6;
-  }
-  for (const poly of shape.polys) {
-    c.beginPath();
-    poly.pts.forEach(([x, y], i) => (i ? c.lineTo(x, y) : c.moveTo(x, y)));
-    c.closePath();
-    c.fillStyle = toneFill(poly.tone, color);
-    c.fill();
-    c.stroke();
+  for (const p of shape.parts) {
+    c.lineWidth = p.w ?? (p.t === 'line' ? 2 : 1.6);
+    if (p.t === 'poly') {
+      c.beginPath();
+      p.pts.forEach(([x, y], i) => (i ? c.lineTo(x, y) : c.moveTo(x, y)));
+      c.closePath();
+      if (p.tone !== 'none') { c.fillStyle = toneFill(p.tone, color); c.fill(); }
+      c.stroke();
+    } else if (p.t === 'circle') {
+      c.beginPath();
+      c.arc(p.cx ?? 50, p.cy ?? 50, p.r, 0, Math.PI * 2);
+      if (p.tone !== 'none') { c.fillStyle = toneFill(p.tone, color); c.fill(); }
+      c.stroke();
+    } else if (p.t === 'line') {
+      c.beginPath();
+      p.pts.forEach(([x, y], i) => (i ? c.lineTo(x, y) : c.moveTo(x, y)));
+      c.stroke();
+    } else if (p.t === 'text') {
+      c.fillStyle = color;
+      c.font = `800 ${p.size}px ${NORTH_FONT}`;
+      c.textAlign = 'center';
+      c.textBaseline = 'middle';
+      c.fillText(p.text, p.x, p.y);
+    }
   }
   c.restore();
 }
+
+/**
+ * Which way the arrow points on the page, in degrees clockwise.
+ *   true   follows the map's rotation, so it always points at true north
+ *   fixed  always straight up the page (a decorative or grid-north arrow)
+ * plus an adjustment, for magnetic declination or grid convergence — the
+ * same idea as ArcGIS Pro's calibration angle and QGIS's rotation offset.
+ */
+export const northRotation = (style) =>
+  (style.northMode === 'fixed' ? 0 : -(state.mapView.bearing ?? 0)) + (Number(style.northOffset) || 0);
 
 /* ------------------------------------------------------------------ */
 /* shapes — the gallery, its geometry and both renderers: ./shapes.js   */
@@ -948,26 +1053,26 @@ export const ELEMENT_TYPES = {
 
   /* ---------------------------------------------------------------- */
   north: {
-    label: 'North arrow', icon: '⇧', hint: 'Rotates with the map',
+    label: 'North arrow', icon: '⇧', hint: '14 styles · points to true north',
     inspect: ['north', 'chrome'],
     defaults: { x: 88, y: 5, w: 7, h: 9 },
-    style: { ...TEXT, ...PLAIN, size: 10, weight: 800, color: '#0f172a', align: 'center', variant: 'arrow', showLabel: true },
+    style: { ...TEXT, ...PLAIN, size: 10, weight: 800, color: '#0f172a', align: 'center', variant: 'arrow', showLabel: true, northMode: 'true', northOffset: 0 },
     dom(inner, elm, ctx) {
       const { u } = ctx;
       const s = elm.style;
-      const labelH = s.showLabel === false ? 0 : u(s.size) * 1.35;
+      const labelH = s.showLabel === false || northDrawsLetter(s.variant) ? 0 : u(s.size) * 1.35;
       inner.innerHTML =
         `<div style="height:calc(100% - ${labelH}px);display:grid;place-items:center">
-           <div style="height:100%;aspect-ratio:1">${northSvg(s.variant, s.color, -(state.mapView.bearing ?? 0))}</div>
+           <div style="height:100%;aspect-ratio:1">${northSvg(s.variant, s.color, northRotation(s))}</div>
          </div>` +
         (labelH ? `<div style="height:${labelH}px;line-height:${labelH}px;text-align:center;font-weight:${s.weight}">N</div>` : '');
     },
     paint(c, elm, box, ctx) {
       const { u } = ctx;
       const s = elm.style;
-      const labelH = s.showLabel === false ? 0 : u(s.size) * 1.35;
+      const labelH = s.showLabel === false || northDrawsLetter(s.variant) ? 0 : u(s.size) * 1.35;
       const side = Math.max(4, Math.min(box.w, box.h - labelH));
-      paintNorthGlyph(c, s.variant, s.color, box.x + box.w / 2, box.y + (box.h - labelH) / 2, side, -(state.mapView.bearing ?? 0));
+      paintNorthGlyph(c, s.variant, s.color, box.x + box.w / 2, box.y + (box.h - labelH) / 2, side, northRotation(s));
       if (labelH) {
         setFont(c, s, u);
         c.fillStyle = s.color;

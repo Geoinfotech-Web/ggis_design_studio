@@ -122,7 +122,7 @@ export function render() {
         ]),
     list.length ? section('', el('p', {
       style: { margin: 0, fontSize: '10.5px', lineHeight: '1.5', color: '#94a3b8' },
-      text: 'Click a layer to change its colours, line weight and labels in the right-hand panel.',
+      text: 'Tap or click a layer to change its colours, line weight and labels.',
     })) : null,
   ]);
 }

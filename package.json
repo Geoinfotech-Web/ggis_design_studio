@@ -17,7 +17,10 @@
     "import": "node --max-old-space-size=8192 server/import-pbf.mjs",
     "import:world": "node --max-old-space-size=8192 server/import-world.mjs",
     "extract:world": "python -I server/extract-world.py",
-    "ai": "node server/ai-backend.mjs"
+    "ai": "node server/ai-backend.mjs",
+    "serve": "node server/supervise.mjs",
+    "autostart": "powershell -ExecutionPolicy Bypass -File server/autostart.ps1",
+    "autostart:remove": "powershell -ExecutionPolicy Bypass -File server/autostart.ps1 -Remove"
   },
   "dependencies": {
     "@mapbox/vector-tile": "^3.0.0",

@@ -154,8 +154,17 @@ export async function through(entry, load, opts = {}) {
 
   const result = await load();
   // An aborted fetch resolves to nothing useful; do not poison the cache.
-  if (result && !opts.signal?.aborted) await write(entry, result);
+  // A stand-in answer (built from map tiles while Overpass was slow) is not
+  // stored under Overpass's key either: the real download, still running in
+  // the background, is stored by `storeLater` when it arrives.
+  if (result && !opts.signal?.aborted && !result.meta?.noStore) await write(entry, result);
   return result;
+}
+
+/** Store a download that finished after its caller had moved on. */
+export function storeLater(entry, geojson) {
+  if (!geojson?.features) return Promise.resolve();
+  return write(entry, geojson).catch(() => {});
 }
 
 /**

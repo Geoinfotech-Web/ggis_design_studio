@@ -149,6 +149,23 @@ Every download goes through a layered cache (`data/cache/`):
 - The cache is filled ahead of time by `import-pbf.mjs` (whole country from a
   Geofabrik extract, per state) or `prefetch.mjs` (live APIs, tiled).
 
+### Map tiles as a stand-in data source
+
+Overpass is a donated public service and can be slow or unreachable outside
+the areas already in the shared database. `src/data/vectortiles.js` builds a
+dataset from OpenFreeMap's vector tiles (the basemap's own data, OpenMapTiles
+schema) instead: tile features are translated back into OpenStreetMap tags,
+filtered by the catalogue's own Overpass query (compiled by `server/ql.js`),
+classified and styled exactly like Overpass data, and clipped to their tile.
+`fetchDataset` races Overpass against the tiles after a 4 s grace period;
+if the tiles win, the Overpass download continues in the background and is
+stored for next time. Each dataset declares the zoom range its features exist
+at in the tiles (roads and rivers from z9, streets z12, points of interest
+z14), and the reader picks the most detailed zoom within a tile budget — so
+major roads, railways and rivers work for a whole country, points of
+interest for an LGA or city. Power lines, oil and gas and a few other
+datasets are not in the tiles and still need Overpass.
+
 ## Accounts and project sync
 
 - `server/account-server.mjs` with `accounts.db` (`users`, `sessions`,

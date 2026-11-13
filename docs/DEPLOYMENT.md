@@ -102,6 +102,15 @@ studio.example.com {
 Caddy passes `X-Forwarded-For` and `X-Forwarded-Proto` by default. With
 another proxy, make sure it does.
 
+## Keeping the servers running (local or single machine)
+
+`npm run serve` runs `server/supervise.mjs`, which starts the studio (5173),
+the data cache (8788) and the accounts service (8789), health-checks them
+every 30 s and restarts any that exit or stop answering. Logs go to
+`server/data/logs/`. On Windows, `npm run autostart` registers a per-user
+scheduled task that runs it at sign-in (`npm run autostart:remove` undoes
+it). With Docker, the `restart: unless-stopped` policy does the same job.
+
 ## Option B — without Docker
 
 ```bash

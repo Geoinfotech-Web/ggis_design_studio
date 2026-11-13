@@ -19,7 +19,8 @@
 import osmtogeojson from 'osmtogeojson';
 import { ENDPOINTS } from '../core/constants.js';
 import { bboxToOverpass } from '../core/geo.js';
-import { through, available } from './cache/index.js';
+import { through, available, storeLater } from './cache/index.js';
+import { fetchFromTiles, tileZoomFor } from './vectortiles.js';
 import { hash } from './cache/key.js';
 
 /**
@@ -332,6 +333,71 @@ function fetchLive(dataset, bbox, opts) {
 }
 
 /**
+ * How long Overpass gets before the map tiles are asked as well. Long enough
+ * that a healthy mirror (usually 1–5 s) still wins with the full data, short
+ * enough that nobody stares at a spinner while every mirror is busy.
+ */
+const TILE_GRACE_MS = 4000;
+
+/**
+ * Overpass, with the basemap's vector tiles as a stand-in.
+ *
+ *   - Overpass answers within the grace period → its answer, as before.
+ *   - Overpass is still busy after it → the tiles are read too, and whichever
+ *     comes back first with data is shown. If that is the tiles, Overpass is
+ *     left running and its answer is stored when it arrives, so the next
+ *     request for this area gets the full data from the cache.
+ *   - Overpass fails outright → the tiles, straight away.
+ *
+ * Datasets the tiles do not carry, or areas too big to read from tiles,
+ * simply wait for Overpass as they always did.
+ */
+function fetchLiveWithTiles(dataset, bbox, opts) {
+  const tilesOk = tileZoomFor(dataset, bbox) !== null;
+  if (!tilesOk) return fetchLive(dataset, bbox, opts);
+
+  // Once something has been shown, the request still running in the
+  // background must stop writing "waiting…" over the result.
+  let settled = false;
+  const quiet = { ...opts, onProgress: (msg) => { if (!settled) opts.onProgress?.(msg); } };
+  const live = fetchLive(dataset, bbox, quiet);
+
+  return new Promise((resolve, reject) => {
+    let liveError = null;
+    let tilesStarted = false;
+    let tilesFailed = false;
+    const win = (value) => { if (!settled) { settled = true; clearTimeout(timer); resolve(value); } };
+    const fail = (err) => { if (!settled) { settled = true; clearTimeout(timer); reject(err); } };
+
+    const startTiles = () => {
+      if (tilesStarted || settled) return;
+      tilesStarted = true;
+      opts.onProgress?.('OpenStreetMap is slow — reading the map tiles instead…');
+      fetchFromTiles(dataset, bbox, quiet).then((g) => {
+        if (settled) return;
+        if (!g.features.length && !liveError) return;      // let Overpass decide
+        g.meta = { ...g.meta, noStore: true };
+        win(g);
+        // Keep the full download coming, for next time.
+        live.then((full) => storeLater(cacheEntryFor(dataset, bbox), full)).catch(() => {});
+      }).catch((err) => {
+        tilesFailed = true;
+        if (liveError) fail(liveError);
+        else if (err?.name === 'AbortError') fail(err);
+      });
+    };
+
+    const timer = setTimeout(startTiles, TILE_GRACE_MS);
+    live.then(win, (err) => {
+      liveError = err;
+      if (err?.name === 'AbortError') return fail(err);
+      if (tilesFailed) return fail(err);
+      startTiles();
+    });
+  });
+}
+
+/**
  * Fetch one catalogue dataset for a bbox and return GeoJSON.
  *
  * Resolved from the fastest source that has it — this tab, this browser's
@@ -348,13 +414,25 @@ export function fetchDataset(dataset, bbox, opts = {}) {
 
   return through(
     cacheEntryFor(dataset, bbox),
-    () => fetchLive(dataset, bbox, opts),
+    () => fetchLiveWithTiles(dataset, bbox, opts),
     opts,
   ).then((geojson) => {
-    cache.set(key, geojson);
+    // A tile stand-in is not remembered for the session either, so asking
+    // again once Overpass has delivered gets the full data.
+    if (!geojson.meta?.fromTiles) cache.set(key, geojson);
     return geojson;
   });
 }
+
+/**
+ * Read a dataset straight from the map tiles, for an area too large to ask
+ * Overpass for. Null when the tiles cannot cover it either.
+ */
+export function fetchTilesOnly(dataset, bbox, opts = {}) {
+  if (tileZoomFor(dataset, bbox) === null) return null;
+  return fetchFromTiles(dataset, bbox, opts);
+}
+export { tileZoomFor };
 
 /**
  * Is this dataset already stored for this area?

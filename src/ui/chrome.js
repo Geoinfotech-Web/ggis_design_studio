@@ -23,6 +23,7 @@ import { uiIcon } from './ui-icons.js';
 import {
   renderElements, layoutArtboard, paperDims, setPanMode, hint,
   isLayoutLocked, setLayoutLocked, zoomLayout, panLayout, fitLayout, layoutZoom, toggleGrid, toggleMapFrame,
+  keepFrameExtent,
 } from './artboard.js';
 
 /* ------------------------------------------------------------------ */
@@ -69,18 +70,71 @@ const isActiveTool = (tool) => state.activeTool === tool.id || Boolean(tool.also
  * has to think about. The breakpoint is duplicated in studio.css; it is the
  * one number the two have to agree on.
  */
-const narrow = () => window.matchMedia('(max-width: 760px)').matches;
+const narrow = () => window.matchMedia('(max-width: 900px)').matches;
 
 const studioEl = () => $('#studio');
 
+// Sheets slide for 0.22 s; the page frame is re-laid once they have landed,
+// keeping the same ground inside it.
+const SHEET_SLIDE_MS = 260;
+
 function setPanelOpen(open) {
+  const was = studioEl()?.classList.contains('is-panel-open');
   studioEl()?.classList.toggle('is-panel-open', open);
-  resizeSoon();
+  if (!open) studioEl()?.classList.remove('is-sheet-full');
+  if (was !== open) keepFrameExtent(SHEET_SLIDE_MS);
 }
 
 function setInspectorOpen(open) {
+  const was = studioEl()?.classList.contains('is-inspector-open');
   studioEl()?.classList.toggle('is-inspector-open', open);
-  resizeSoon();
+  if (was !== open) keepFrameExtent(SHEET_SLIDE_MS);
+}
+
+/** On a phone, open the left panel as a sheet (no-op on wider screens). */
+export function openPanelOnPhone() {
+  if (narrow()) setPanelOpen(true);
+}
+export const isNarrow = narrow;
+
+/**
+ * The bar across the top of a sheet on a phone: a handle that switches the
+ * sheet between half height (map visible above) and full height, and a close
+ * button that puts the map back. Hidden by CSS on wider screens.
+ */
+function addSheetBar(panel, close) {
+  if (!panel || panel.querySelector(':scope > .sheet-bar')) return;
+  const grab = el('button.sheet-grab', { type: 'button', 'aria-label': 'Expand or shrink this panel', title: 'Expand or shrink' }, [el('span')]);
+  grab.addEventListener('click', () => { studioEl()?.classList.toggle('is-sheet-full'); keepFrameExtent(SHEET_SLIDE_MS); });
+  const shut = el('button.sheet-close', { type: 'button', 'aria-label': 'Close panel and show the map', title: 'Show the map', html: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>' });
+  shut.addEventListener('click', () => { studioEl()?.classList.remove('is-sheet-full'); close(); });
+  panel.prepend(el('div.sheet-bar', {}, [grab, shut]));
+}
+
+/** On a phone the less-used header buttons live behind the account initials. */
+function accountMenu(chip, onSignOut) {
+  let menu = null;
+  const shut = () => { menu?.remove(); menu = null; document.removeEventListener('pointerdown', outside, true); };
+  const outside = (e) => { if (menu && !menu.contains(e.target) && e.target !== chip) shut(); };
+  const item = (label, run) => {
+    const b = el('button.account-menu-item', { type: 'button', text: label });
+    b.addEventListener('click', () => { shut(); run(); });
+    return b;
+  };
+  chip.addEventListener('click', () => {
+    if (!narrow()) return;
+    if (menu) { shut(); return; }
+    const user = currentUser();
+    menu = el('div.account-menu', { role: 'menu' }, [
+      el('div.account-menu-who', {}, [el('strong', { text: user?.name ?? '' }), el('span', { text: user?.email ?? '' })]),
+      item('Save to My projects', () => saveNow()),
+      item('Export PNG', () => runExport('png')),
+      item('Switch light / dark', () => $('#theme-btn')?.click()),
+      item('Sign out', onSignOut),
+    ]);
+    document.body.append(menu);
+    document.addEventListener('pointerdown', outside, true);
+  });
 }
 
 function renderRail() {
@@ -235,7 +289,7 @@ function toggleGridLines() {
   setFlyout(null);
   const on = toggleGrid();
   renderMapControls();
-  if (on) hint('<b>Grid on</b> — style it on the right: interval, label format, which edges. Press <b>G</b> to remove it.', 5200);
+  if (on) hint('<b>Grid on</b> — style it in the settings panel: interval, label format, which edges. Press <b>G</b> to remove it.', 5200);
 }
 const tbIcon = (name, size = 17) => el('span.tb-ico', {
   html: `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${TB_ICONS[name]}</svg>`,
@@ -601,7 +655,9 @@ function initHeader(onHome, onSignOut) {
     const save = el('button.icon-btn#save-btn', { type: 'button', title: 'Save to your projects (Ctrl+S)', 'aria-label': 'Save project', text: '⤓' });
     save.addEventListener('click', saveNow);
     undoBtn.before(save);
-    undoBtn.before(themeToggle());
+    const theme = themeToggle();
+    theme.id = 'theme-btn';
+    undoBtn.before(theme);
   }
 
   // Who is signed in, and the way out.
@@ -612,10 +668,13 @@ function initHeader(onHome, onSignOut) {
     out.addEventListener('click', onSignOut);
     exportBtn.after(
       el('span.header-sep'),
-      el('span.account-chip#account-chip', { title: `${user.name} · ${user.email}`, role: 'img', 'aria-label': `Signed in as ${user.name}`, text: initials(user) }),
+      el('button.account-chip#account-chip', { type: 'button', title: `${user.name} · ${user.email}`, 'aria-label': `Signed in as ${user.name}`, text: initials(user) }),
       out,
     );
+    accountMenu($('#account-chip'), onSignOut);
   }
+  addSheetBar($('#left-panel'), () => setPanelOpen(false));
+  addSheetBar($('#right-panel'), () => setInspectorOpen(false));
 
   $('#back-home')?.addEventListener('click', onHome);
   $('#undo-btn')?.addEventListener('click', () => { if (undo()) { renderElements(); layoutArtboard(); } });
@@ -689,22 +748,41 @@ export function initChrome({ onHome, onSignOut }) {
 
   // On a narrow screen the inspector is a sheet, so it has to be summoned by
   // the thing it inspects and dismissed when nothing is selected.
+  //
+  // It waits for the finger to lift: opening it re-lays the page frame above
+  // the sheet, and doing that in the middle of a drag would move the page out
+  // from under the finger.
+  let pointerDown = false;
+  let pendingSheet = null;
+  window.addEventListener('pointerdown', () => { pointerDown = true; }, { capture: true });
+  const release = () => {
+    pointerDown = false;
+    if (pendingSheet) { const run = pendingSheet; pendingSheet = null; setTimeout(run, 0); }
+  };
+  window.addEventListener('pointerup', release, { capture: true });
+  window.addEventListener('pointercancel', release, { capture: true });
+
   subscribe(['selectedElementId', 'selectedLayerId'], () => {
     if (!narrow()) return;
-    const selected = Boolean(state.selectedElementId || state.selectedLayerId);
-    if (selected) setPanelOpen(false);
-    setInspectorOpen(selected);
+    const apply = () => {
+      const selected = Boolean(state.selectedElementId || state.selectedLayerId);
+      if (selected) setPanelOpen(false);
+      setInspectorOpen(selected);
+    };
+    if (pointerDown) pendingSheet = apply; else apply();
   });
 
-  // Touching the map is how you get back to the map.
-  $('#canvas-wrap')?.addEventListener('pointerdown', () => {
+  // Touching the map is how you get back to the map — but not touching an
+  // element on the page, which is how you select and move it.
+  $('#canvas-wrap')?.addEventListener('pointerdown', (event) => {
     if (!narrow()) return;
+    if (event.target.closest?.('.el, .el-handle')) return;
     setPanelOpen(false);
     setInspectorOpen(false);
   }, { capture: true });
 
   // Coming back to a wide window must not leave a sheet class behind.
-  window.matchMedia('(max-width: 760px)').addEventListener('change', (e) => {
+  window.matchMedia('(max-width: 900px)').addEventListener('change', (e) => {
     if (e.matches) return;
     studioEl()?.classList.remove('is-panel-open', 'is-inspector-open');
     resizeSoon();

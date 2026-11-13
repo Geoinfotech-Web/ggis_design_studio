@@ -10,7 +10,7 @@
 import { $, el, fill } from '../core/dom.js';
 import { state, set, subscribe, checkpoint, touch } from '../core/store.js';
 import { FONTS, PAPER_SIZES, EXPORT_RESOLUTIONS, effectiveDpi, paperDimsLabel, BASEMAPS, basemapOptions } from '../core/constants.js';
-import { ELEMENT_TYPES, elementLabel, SHAPE_VARIANTS, zoomInsetView } from '../layout/elements.js';
+import { ELEMENT_TYPES, elementLabel, SHAPE_VARIANTS, zoomInsetView, NORTH_STYLES, northSvg, northDrawsLetter } from '../layout/elements.js';
 import {
   updateElement, removeElement, duplicateElement, renderElements, layoutArtboard,
   setInsetEditing, insetEditingId,
@@ -358,19 +358,39 @@ function groupChrome(elm) {
 function groupNorth(elm) {
   const s = elm.style;
   const setStyle = styleSetter(elm);
+  // A gallery of the real glyphs, drawn by the same code as the page, in the
+  // interface's ink colour so it reads in light and dark mode.
+  const ink = getComputedStyle(document.documentElement).getPropertyValue('--ink').trim() || '#0f172a';
+  const gallery = el('div.north-gallery', { role: 'listbox', 'aria-labelledby': `north-style-${elm.id}` }, NORTH_STYLES.map((style) => {
+    const on = (s.variant ?? 'arrow') === style.id;
+    const btn = el('button.north-option', {
+      type: 'button', role: 'option', title: style.label, 'aria-label': style.label, 'aria-selected': String(on),
+      html: `<span class="north-option-glyph">${northSvg(style.id, ink, 0)}</span><span class="north-option-name">${style.label}</span>`,
+    });
+    btn.classList.toggle('is-active', on);
+    btn.addEventListener('click', () => { setStyle({ variant: style.id }); renderInspector(); });
+    return btn;
+  }));
+  const fixed = s.northMode === 'fixed';
   return section('North arrow', stack([
-    labelled('Style', seg(
-      [{ value: 'arrow', label: 'Arrow' }, { value: 'needle', label: 'Needle' }, { value: 'compass', label: 'Compass' }],
-      s.variant, (value) => setStyle({ variant: value }),
-    )),
-    inspectorRow('Colour', colorInput(s.color, (value) => setStyle({ color: value }))),
-    inspectorRow('Label size', slider({ min: 4, max: 30, step: 0.5, value: s.size }, (v) => setStyle({ size: v }))),
-    checkRow('Show the letter N', s.showLabel !== false, (on) => setStyle({ showLabel: on })),
+    // Not labelled(): that wraps in a <label>, which hands every hover and
+    // stray click in the gallery to its first button.
+    el('div', {}, [el('span.field-label', { text: 'Style', id: `north-style-${elm.id}` }), gallery]),
+    labelled('Points to', seg(
+      [{ value: 'true', label: 'True north' }, { value: 'fixed', label: 'Always up' }],
+      fixed ? 'fixed' : 'true', (value) => { setStyle({ northMode: value }); renderInspector(); },
+    ), fixed
+      ? 'Straight up the page, whatever the map does — for a grid-north or decorative arrow.'
+      : 'Turns with the map, so it always points at true north even if you rotate the view.'),
+    inspectorRow('Adjust angle', slider({ min: -45, max: 45, step: 0.5, value: Number(s.northOffset) || 0, suffix: '°' }, (v) => setStyle({ northOffset: v }))),
     el('p', {
-      style: { margin: 0, fontSize: '10px', color: '#94a3b8', lineHeight: '1.4' },
-      text: 'The arrow turns with the map, so it stays honest if you rotate the view.',
+      style: { margin: '-4px 0 0', fontSize: '10px', color: '#94a3b8', lineHeight: '1.4' },
+      text: 'For magnetic north or grid north, enter the declination or convergence for your area (east positive). Leave at 0° for true north.',
     }),
-  ]));
+    inspectorRow('Colour', colorInput(s.color, (value) => setStyle({ color: value }))),
+    northDrawsLetter(s.variant) ? null : inspectorRow('Label size', slider({ min: 4, max: 30, step: 0.5, value: s.size }, (v) => setStyle({ size: v }))),
+    northDrawsLetter(s.variant) ? null : checkRow('Show the letter N', s.showLabel !== false, (on) => setStyle({ showLabel: on })),
+  ].filter(Boolean)));
 }
 
 function groupScale(elm) {

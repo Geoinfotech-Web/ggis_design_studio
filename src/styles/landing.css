@@ -225,3 +225,14 @@
 
 /* Logo at the top of the sign-up / sign-in dialog */
 .auth-brand { display: flex; justify-content: center; margin: 2px 0 14px; }
+
+/* Phones: the sign-in dialog fits the screen and scrolls if it must. */
+@media (max-width: 520px) {
+  .auth-modal { padding: 12px; }
+  .auth-modal.is-open { grid-template-columns: minmax(0, 1fr); }
+  .land-btn { white-space: nowrap; }
+  .land-bar .land-btn { padding: 0 14px; }
+  .auth-dialog { padding: 26px 18px 20px; border-radius: 18px; }
+  .auth-google-slot { overflow: hidden; }
+  .auth-dialog input { font-size: 16px; }
+}

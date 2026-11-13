@@ -15,7 +15,7 @@ import { notify } from '../../core/toast.js';
 import {
   GROUPS, datasetsInGroup, datasetBySlug, classify, segmentsOf, isMerged,
 } from '../../data/catalog.js';
-import { fetchDataset, checkSize, isDatasetCached } from '../../data/overpass.js';
+import { fetchDataset, checkSize, isDatasetCached, fetchTilesOnly, tileZoomFor } from '../../data/overpass.js';
 import {
   fetchOvertureSupplement, checkSupplement, isFromOsm, isSupplementCached,
 } from '../../data/overture.js';
@@ -200,8 +200,11 @@ async function fetchForPart(dataset, part, { signal, onProgress }) {
   const supStored = supplement && !room.ok ? await isSupplementCached(supplement, part.bbox) : null;
 
   const [osm, extra] = await Promise.all([
-    // Cached per slug + bbox, so re-filtering never re-downloads.
-    fetchDataset(dataset, part.bbox, { signal, onProgress }),
+    // Cached per slug + bbox, so re-filtering never re-downloads. An area
+    // too large for Overpass is read straight from the map tiles.
+    part.tilesOnly
+      ? fetchTilesOnly(dataset, part.bbox, { signal, onProgress })
+      : fetchDataset(dataset, part.bbox, { signal, onProgress }),
     // Overture is a supplement, never a requirement: if it is unavailable or
     // the area is too big for it, the dataset is still the dataset.
     room.ok || supStored
@@ -365,12 +368,12 @@ function scheduleWarm() {
  * Returns null unless every piece is either already stored or small enough
  * to fetch live: a half-loaded country would be worse than an honest no.
  */
-async function piecesFor(dataset, part) {
+async function piecesFor(dataset, part, { storedOnly = false } = {}) {
   if (part.level !== 'country' || !part.countryCode) return null;
   const regions = await listWorld({ country: part.countryCode, level: 'state' });
   if (!regions.length) return null;
   const usable = await Promise.all(regions.map(async (r) =>
-    checkSize(dataset, r.bbox).ok || Boolean(await isDatasetCached(dataset, r.bbox))));
+    (!storedOnly && checkSize(dataset, r.bbox).ok) || Boolean(await isDatasetCached(dataset, r.bbox))));
   if (!usable.every(Boolean)) return null;
   return regions.map((r) => ({ name: r.name, bbox: r.bbox, geojson: part.geojson, osmId: `${part.osmId}/${r.id}` }));
 }
@@ -415,6 +418,12 @@ async function addDataset(dataset, { quiet = false } = {}) {
   for (const part of areaPartsList) {
     const size = checkSize(dataset, part.bbox);
     if (size.ok || await isDatasetCached(dataset, part.bbox)) { parts.push(part); continue; }
+    // Best first: every region already stored (full detail, instant); then
+    // the basemap's own tiles (fast — major roads, railways and rivers for a
+    // whole country); then Overpass region by region, as a last resort.
+    const stored = dataset.heavy ? null : await piecesFor(dataset, part, { storedOnly: true });
+    if (stored) { parts.push(...stored); continue; }
+    if (tileZoomFor(dataset, part.bbox) !== null) { parts.push({ ...part, tilesOnly: true }); continue; }
     const pieces = dataset.heavy ? null : await piecesFor(dataset, part);
     if (pieces) { parts.push(...pieces); continue; }
     refuseTooBig(dataset, part, areaPartsList.length > 1);
@@ -494,9 +503,11 @@ async function addDataset(dataset, { quiet = false } = {}) {
     // app feeling broken and the app feeling fast — and the age is what tells
     // someone whether to think about refreshing it.
     const cached = clipped.meta?.cache;
-    const via = cached
-      ? ` from ${cached.source === 'database' ? 'the shared database' : 'cache'}${cached.ageDays > 1 ? `, stored ${cached.ageDays} days ago` : ''}`
-      : (clipped.meta?.seconds ? ` in ${clipped.meta.seconds}s` : '');
+    const via = clipped.meta?.fromTiles
+      ? ` from the map tiles in ${clipped.meta.seconds}s — simplified to load fast while OpenStreetMap was slow or the area was large`
+      : cached
+        ? ` from ${cached.source === 'database' ? 'the shared database' : 'cache'}${cached.ageDays > 1 ? `, stored ${cached.ageDays} days ago` : ''}`
+        : (clipped.meta?.seconds ? ` in ${clipped.meta.seconds}s` : '');
     const plus = merged?.overtureAdded
       ? ` — ${formatNumber(merged.overtureAdded, 0)} added by Overture on top of OpenStreetMap`
       : '';

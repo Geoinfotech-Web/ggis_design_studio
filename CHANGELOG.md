@@ -5,6 +5,42 @@ follow [Semantic Versioning](https://semver.org).
 
 ## Unreleased
 
+### Data that always loads
+- When OpenStreetMap's public Overpass servers are slow (no answer within
+  4 s) or fail, a dataset is built from the basemap's own OpenFreeMap vector
+  tiles instead (`src/data/vectortiles.js`) — e.g. Nairobi major roads now
+  load in about 5 s where Overpass failed after 43 s. The full Overpass download
+  keeps running in the background and is stored for next time.
+- Areas too large for Overpass (whole countries) load major roads, railways
+  and rivers from the tiles instead of being refused.
+- `server/supervise.mjs` (`npm run serve`) keeps the studio, data and
+  accounts servers running and restarts any that stop;
+  `npm run autostart` starts it at Windows sign-in.
+
+### Phones and tablets
+- Up to 900 px wide: panels are sheets over the lower part of the screen
+  with the map visible above, a handle to expand and a close button; the
+  Study area sheet opens by itself; zooming to an area allows for the sheet.
+- One-row header; save, PNG, theme and sign out in a menu behind your
+  initials. Sign-in dialog and Google button fit the screen; messages sit
+  above the toolbar; 16 px inputs so iOS does not zoom.
+
+### North arrows
+- 14 north arrow styles in the families QGIS and ArcGIS Pro offer — simple,
+  split and half-needle arrows, triangle, chevron, navigation pointer, arrow
+  in a circle, compass needle, 4-point compass, star with N E S W, 8- and
+  16-point compass roses, fletched arrow and N on a staff — picked from a
+  visual gallery. Same geometry for screen and export.
+- "Points to": true north (turns with the map) or always up; an adjustment
+  angle for magnetic declination or grid convergence.
+
+### Page layout on every screen
+- The page frame is laid out in the visible part of the map (above the
+  sheet on phones and tablets) and "zoom to area" fits the study area inside
+  the page frame; opening or closing panels or resizing keeps the same
+  ground inside the frame. Touch: drag elements, settings open when the
+  finger lifts, finger-sized resize handles.
+
 ### Brand
 - Renamed to **Mappix Studio**, with the new Mappix logo on the landing page,
   sign-in dialog, studio header, browser tab icon, home-screen icon and in

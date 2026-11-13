@@ -14,7 +14,8 @@ import { renderElementDom, elementLabel, zoomInsetView, createElement, mapFrameO
 import { currentMetresPerPixel } from '../layout/derive.js';
 import { notify } from '../core/toast.js';
 import { paperFill, pageBorderColor, pageStyle } from '../layout/page-style.js';
-import { getMap } from '../core/map.js';
+import { getMap, setFitPadding } from '../core/map.js';
+import { visibleRect, isNarrowScreen } from './viewport.js';
 
 let artboard, layer, label, wrap;
 const nodes = new Map();          // element id → .el node
@@ -81,25 +82,108 @@ export function layoutArtboard() {
   const { wIn, hIn, label: paperLabel, orientation } = paperDims();
   const aspect = wIn / hIn;
 
-  const availW = wrap.clientWidth - 96;
-  const availH = wrap.clientHeight - 84;
-  let w = Math.max(160, availW);
+  // Laid out in the part of the canvas you can see: all of it on a laptop,
+  // the strip above the panel sheet on a phone or tablet. The margins leave
+  // room for the size label above the page and the map tools at the side,
+  // and shrink on a small screen where every pixel of page counts.
+  const view = visibleRect(wrap);
+  const narrowScreen = isNarrowScreen();
+  const marginX = narrowScreen ? 64 : 96;      // the map tools sit at the right
+  const marginTop = narrowScreen ? 26 : 42;    // the "A3 landscape · …" label
+  const marginBottom = narrowScreen ? 12 : 42;
+  const availW = Math.max(120, view.width - marginX);
+  const availH = Math.max(90, view.height - marginTop - marginBottom);
+  let w = availW;
   let h = w / aspect;
-  if (h > availH) { h = Math.max(140, availH); w = h * aspect; }
+  if (h > availH) { h = availH; w = h * aspect; }
 
   // The layout view scales and shifts the fitted page.
   w *= layoutView.zoom;
   h *= layoutView.zoom;
   artboard.style.width = `${w.toFixed(2)}px`;
   artboard.style.height = `${h.toFixed(2)}px`;
-  artboard.style.left = `${((wrap.clientWidth - w) / 2 + layoutView.dx).toFixed(2)}px`;
-  artboard.style.top = `${((wrap.clientHeight - h) / 2 + layoutView.dy).toFixed(2)}px`;
+  // Centred left-right, ignoring the tool column's share on a phone so the
+  // page sits in the middle of the screen; top-to-bottom in the visible strip.
+  const left = view.left + (view.width - w) / 2 - (narrowScreen ? 20 : 0);
+  const top = view.top + marginTop + (availH - h) / 2;
+  artboard.style.left = `${(left + layoutView.dx).toFixed(2)}px`;
+  artboard.style.top = `${(top + layoutView.dy).toFixed(2)}px`;
 
   if (label) {
     const paper = PAPER_SIZES[state.page.size] ?? PAPER_SIZES.a4;
     const zoomNote = layoutView.zoom !== 1 ? ` · ${Math.round(layoutView.zoom * 100)}%` : '';
     label.textContent = `${paperLabel} ${orientation} · ${paperDimsLabel(paper, orientation === 'portrait')} · ${state.page.dpi} dpi${zoomNote}`;
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* the page frame and the map, kept in step                            */
+/* ------------------------------------------------------------------ */
+
+const frameVisible = () => artboard && getComputedStyle(artboard).visibility === 'visible' && artboard.offsetWidth > 40;
+
+/**
+ * Padding that makes "fit this area" land inside the page — inside its map
+ * frame when the layout has one — rather than merely inside the map, so the
+ * study area is what the printed page shows on every screen size.
+ * @param {number} [inner]  extra breathing room, as a share of the frame
+ */
+function framePadding(inner = 0.06) {
+  const map = getMap();
+  if (!map || !frameVisible()) return null;
+  const m = map.getContainer().getBoundingClientRect();
+  const a = artboard.getBoundingClientRect();
+  const frame = mapFrameOf(state.elements);
+  // The map frame element is positioned in % of the page.
+  const box = frame && inner > 0
+    ? { left: a.left + a.width * frame.x / 100, top: a.top + a.height * frame.y / 100, width: a.width * frame.w / 100, height: a.height * frame.h / 100 }
+    : { left: a.left, top: a.top, width: a.width, height: a.height };
+  const room = Math.min(box.width, box.height) * inner;
+  const pad = {
+    top: box.top - m.top + room,
+    left: box.left - m.left + room,
+    right: m.right - (box.left + box.width) + room,
+    bottom: m.bottom - (box.top + box.height) + room,
+  };
+  if (Object.values(pad).some((v) => v < 0) || m.width - pad.left - pad.right < 40 || m.height - pad.top - pad.bottom < 40) return null;
+  return pad;
+}
+
+/** The ground inside the page frame right now, as [[w, s], [e, n]]. */
+function frameExtent() {
+  const map = getMap();
+  if (!map || !frameVisible()) return null;
+  const m = map.getContainer().getBoundingClientRect();
+  const a = artboard.getBoundingClientRect();
+  const sw = map.unproject([a.left - m.left, a.bottom - m.top]);
+  const ne = map.unproject([a.right - m.left, a.top - m.top]);
+  return [[sw.lng, sw.lat], [ne.lng, ne.lat]];
+}
+
+let savedExtent = null;
+
+/**
+ * Re-lay the page frame after the visible area changed — a sheet opened or
+ * closed, the window resized, the phone turned — and move the map so the
+ * same ground is still inside the frame. What you see in the page stays what
+ * prints, instead of drifting every time a panel slides in.
+ * @param {number} [delay]  ms to wait for a sheet's slide to finish
+ */
+export function keepFrameExtent(delay = 0) {
+  const map = getMap();
+  // Only trust the current frame when it is genuinely on screen; when a
+  // sheet covers almost everything, keep the last good extent instead.
+  if (frameVisible() && visibleRect(wrap).height > 150) savedExtent = frameExtent();
+  const extent = savedExtent;
+  setTimeout(() => {
+    map?.resize();
+    layoutArtboard();
+    if (map && extent && frameVisible() && visibleRect(wrap).height > 150) {
+      const pad = framePadding(0);
+      if (pad) map.fitBounds(extent, { padding: pad, duration: 0 });
+    }
+    renderElements();
+  }, delay);
 }
 
 /**
@@ -847,7 +931,14 @@ export function initArtboard() {
     if (state.selectedElementId) set({ selectedElementId: null }, { history: false });
   });
 
-  window.addEventListener('resize', () => { layoutArtboard(); renderElements(); });
+  // Resizing or turning a phone keeps the same ground inside the page.
+  let resizeTimer;
+  window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => keepFrameExtent(0), 120);
+  });
+  // "Zoom to area" fits into the page frame whenever there is one.
+  setFitPadding(() => framePadding());
 
   // Selecting anything else — or nothing, which is what Esc does — ends
   // inset view editing, so the next drag moves elements again.

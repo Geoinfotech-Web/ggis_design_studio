@@ -601,7 +601,7 @@ input[type='range'] { width: 100%; accent-color: var(--accent); }
   .side-panel--right { position: absolute; right: 0; top: 0; bottom: 0; box-shadow: var(--shadow-lg); }
 }
 
-@media (max-width: 760px) {
+@media (max-width: 900px) {
   .studio-body { flex-direction: column-reverse; position: relative; }
 
   /* Rail → bottom bar. Horizontal scroll beats shrinking seven targets
@@ -910,3 +910,103 @@ input[type='range'] { width: 100%; accent-color: var(--accent); }
 }
 .toast-action:first-child { background: var(--surface); color: var(--ink); border-color: transparent; }
 .toast-action:hover { filter: brightness(1.08); }
+
+/* ==================================================================
+   Phones — last in the file so it wins over the desktop rules above.
+
+   The map stays visible: a panel opens as a sheet over the lower part of
+   the screen, with a handle to take it full height and a close button to
+   put the map back. The header is one compact row; the less-used buttons
+   (save, PNG, theme, sign out) are in the menu behind your initials.
+   ================================================================== */
+.sheet-bar { display: none; }
+.account-menu { display: none; }
+
+@media (max-width: 900px) {
+  /* The locked-studio rule above sets the inspector to `relative` (an id
+     selector), which left a 470 px invisible box over half the screen. */
+  .studio #right-panel, .studio.is-locked #right-panel { position: absolute; }
+
+  /* Sheets: about two-thirds of the screen, the map visible above them. */
+  .side-panel:not(.side-panel--right) { top: 32%; border-radius: 18px 18px 0 0; }
+  .studio.is-sheet-full .side-panel:not(.side-panel--right) { top: 0; border-radius: 0; }
+  .side-panel--right { height: 64%; }
+  .studio.is-sheet-full .side-panel--right { height: 100%; border-radius: 0; }
+  /* The sheets reach the bottom of the screen, behind the toolbar; room at
+     the end lets their last button scroll clear of it. */
+  .side-panel { padding-bottom: calc(84px + env(safe-area-inset-bottom)); }
+
+  .sheet-bar {
+    display: flex; align-items: center; justify-content: center;
+    position: sticky; top: 0; z-index: 6; height: 36px; margin-bottom: -6px;
+    background: var(--surface); border-radius: inherit;
+  }
+  .sheet-grab {
+    display: grid; place-items: center; width: 96px; height: 32px;
+    border: 0; background: none; cursor: pointer; touch-action: manipulation;
+  }
+  .sheet-grab span { display: block; width: 44px; height: 5px; border-radius: 99px; background: var(--line-strong); }
+  .sheet-close {
+    position: absolute; right: 8px; top: 2px; display: grid; place-items: center;
+    width: 36px; height: 32px; border: 0; border-radius: 10px;
+    background: var(--line-soft); color: var(--ink-soft); cursor: pointer;
+  }
+
+  /* Header: one row — logo, map name, undo/redo, Export, your initials. */
+  .studio-header { flex-wrap: nowrap; height: 54px; padding: 6px 10px; gap: 6px; }
+  .studio-header > :last-child { margin-left: 0; }
+  .studio-header > :first-child { flex: 1 1 auto; min-width: 0; }
+  .project-name-input { font-size: 15px; max-width: 100%; }
+  #save-btn, #theme-btn, #export-png-btn, #sign-out-btn, .studio-header .header-sep { display: none !important; }
+  #export-pdf-btn { padding: 0 11px; height: 36px; font-size: 13px; white-space: nowrap; }
+  .studio-header .icon-btn { width: 34px; height: 34px; }
+  #account-chip { cursor: pointer; border: 0; font: inherit; }
+
+  .account-menu {
+    display: flex; flex-direction: column; position: fixed; z-index: 450;
+    top: 58px; right: 10px; width: min(260px, calc(100vw - 20px)); padding: 6px;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
+    box-shadow: 0 16px 40px rgba(var(--shadow-tint), .22);
+  }
+  .account-menu-who { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px 10px; border-bottom: 1px solid var(--line-soft); margin-bottom: 4px; }
+  .account-menu-who strong { font-size: 14px; color: var(--ink); }
+  .account-menu-who span { font-size: 12px; color: var(--ink-faint); overflow: hidden; text-overflow: ellipsis; }
+  .account-menu-item {
+    text-align: left; padding: 12px 10px; border: 0; border-radius: 9px; background: none;
+    color: var(--ink); font: inherit; font-size: 15px; cursor: pointer;
+  }
+  .account-menu-item:active { background: var(--accent-wash); }
+
+  /* Messages above the bottom toolbar, full width, not over it. */
+  .toast-stack { left: 10px; right: 10px; bottom: calc(66px + env(safe-area-inset-bottom)); }
+  .toast { min-width: 0; max-width: none; }
+
+  /* 16 px text in inputs stops iOS zooming the page when one is tapped. */
+  .field, input.field, select.field, textarea.field, .place-search-input { font-size: 16px; }
+  .field { min-height: 40px; }
+
+  /* Bigger touch targets in panel lists. */
+  .row { min-height: 44px; }
+  .btn-primary, .btn-soft, .btn-ghost { min-height: 40px; }
+}
+
+/* Fingers need bigger resize handles than a mouse pointer does. */
+@media (pointer: coarse) {
+  .el-handle { height: 22px; width: 22px; border-radius: 6px; border-width: 2px; }
+  .el-handle[data-h='se'] { right: -12px; bottom: -12px; }
+  .el-handle[data-h='sw'] { left: -12px; bottom: -12px; }
+  .el-handle[data-h='ne'] { right: -12px; top: -12px; }
+  .el-handle[data-h='nw'] { left: -12px; top: -12px; }
+}
+
+/* North arrow style gallery (inspector) */
+.north-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 6px; }
+.north-option {
+  display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 4px 6px;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink);
+  cursor: pointer; transition: border-color .12s, background .12s;
+}
+.north-option:hover { border-color: var(--accent-soft); background: var(--accent-wash); }
+.north-option.is-active { border-color: var(--accent); background: var(--accent-wash); box-shadow: 0 0 0 1px var(--accent) inset; }
+.north-option-glyph { display: block; width: 34px; height: 34px; }
+.north-option-name { font-size: 10px; line-height: 1.2; text-align: center; color: var(--ink-soft); }

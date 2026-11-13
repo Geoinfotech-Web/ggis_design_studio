@@ -257,7 +257,34 @@ export function applyLook(look) {
 /* ------------------------------------------------------------------ */
 export function flyToBounds(bounds, opts = {}) {
   if (!map || !bounds) return;
-  map.fitBounds(bounds, { padding: 70, duration: 900, ...opts });
+  map.fitBounds(bounds, { padding: fitPadding?.() ?? sheetAwarePadding(70), duration: 900, ...opts });
+}
+
+/**
+ * Where "fit this area" should aim, supplied by the artboard: inside the page
+ * frame when there is one. Without it, the visible part of the map.
+ */
+let fitPadding = null;
+export function setFitPadding(fn) { fitPadding = fn; }
+
+/**
+ * On a phone an open panel is a sheet over the lower part of the map, so
+ * "fit this area" has to fit it into the part still showing, or Lagos ends
+ * up underneath the sheet and the view shows Oyo.
+ */
+function sheetAwarePadding(base) {
+  const studio = document.getElementById('studio');
+  const container = map.getContainer();
+  if (!studio || !window.matchMedia('(max-width: 900px)').matches) return base;
+  const sheets = ['left-panel', 'right-panel']
+    .map((id) => document.getElementById(id))
+    .filter((panel) => panel && getComputedStyle(panel).visibility === 'visible');
+  if (!sheets.length) return base;
+  const mapBox = container.getBoundingClientRect();
+  const sheetTop = Math.min(...sheets.map((panel) => panel.getBoundingClientRect().top));
+  const covered = Math.max(0, mapBox.bottom - sheetTop);
+  const pad = Math.min(24, base);
+  return { top: pad, left: pad, right: pad + 44, bottom: Math.min(covered + pad, mapBox.height - 80) };
 }
 
 export function flyTo(view) {

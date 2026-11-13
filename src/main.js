@@ -30,7 +30,7 @@ import { boundsFromBbox } from './core/geo.js';
 import { reapplyMapState, watchBuildings3d } from './templates/apply.js';
 import { initArtboard, layoutArtboard, renderElements, hint } from './ui/artboard.js';
 import { thumbnailDataUrl } from './export/render.js';
-import { initChrome } from './ui/chrome.js';
+import { initChrome, isNarrow, openPanelOnPhone } from './ui/chrome.js';
 import { initInspector } from './ui/inspector.js';
 import { initLanding } from './ui/landing.js';
 import { setTool } from './ui/tool.js';
@@ -219,7 +219,20 @@ async function newMap() {
   layoutArtboard();
   renderElements();
   resizeSoon(60);
-  hint('Start on the left: choose a <b>study area</b>. The other tools open once it is set.', 7000);
+  startHint();
+}
+
+/**
+ * Where to begin. On a phone the panels are sheets, so the Study area sheet
+ * is opened for you rather than pointing at a panel that is not on screen.
+ */
+function startHint() {
+  if (isNarrow()) {
+    openPanelOnPhone();
+    hint('Start here: choose a <b>study area</b>. The other tools open once it is set.', 6000);
+  } else {
+    hint('Start on the left: choose a <b>study area</b>. The other tools open once it is set.', 7000);
+  }
 }
 
 /** Reopen a saved project by its library id. */
@@ -338,7 +351,7 @@ async function enterStudio(user) {
     setTool('area');
     layoutArtboard();
     renderElements();
-    hint('Start on the left: choose a <b>study area</b>. The other tools open once it is set.', 7000);
+    startHint();
   }
 
   // The account's maps live on the server; bring down whatever was saved on

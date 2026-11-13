@@ -91,6 +91,10 @@ export async function renderGoogleButton(container, { mode, width = 372, onCrede
       },
     });
     container.replaceChildren();
+    // Google draws the button at a fixed pixel width; on a phone 372 px is
+    // wider than the dialog, so fit it to the space actually there.
+    const room = Math.floor(container.getBoundingClientRect().width || container.parentElement?.clientWidth || width);
+    width = Math.max(200, Math.min(width, room));
     google.accounts.id.renderButton(container, {
       type: 'standard',
       theme: 'outline',
