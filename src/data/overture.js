@@ -38,7 +38,7 @@ const STAC_CATALOG = 'https://stac.overturemaps.org/catalog.json';
  * releases published, so a stale pin still returns real data — it just will
  * not be the newest month.
  */
-const FALLBACK_RELEASE = '2026-07-22.0';
+const FALLBACK_RELEASE = '2026-10-21.0';
 
 /**
  * How many tiles one dataset may pull. This is the whole download budget:
@@ -67,7 +67,9 @@ export function latestRelease() {
       const json = await res.json();
       const ids = (json.links ?? [])
         .filter((l) => l.rel === 'child' && typeof l.href === 'string')
-        .map((l) => l.href.replace(/^\.\//, '').replace(/\/catalog\.json$/, ''))
+        // Relative ("./2026-10-21.0/catalog.json") in older catalogues,
+        // absolute ("https://stac…/2026-10-21.0/catalog.json") since late 2026.
+        .map((l) => l.href.replace(/\/catalog\.json$/, '').split('/').pop())
         .filter((id) => /^\d{4}-\d{2}-\d{2}\.\d+$/.test(id))
         .sort();
       return ids[ids.length - 1] ?? FALLBACK_RELEASE;

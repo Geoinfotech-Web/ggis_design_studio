@@ -340,6 +340,17 @@ function fetchLive(dataset, bbox, opts) {
 const TILE_GRACE_MS = 4000;
 
 /**
+ * The grace period, unless there is no point waiting: when the best mirror
+ * has failed in the last few minutes, or has lately been taking longer than
+ * the grace period itself, the tiles are read at once alongside it.
+ */
+function tileGraceMs(now = Date.now()) {
+  const best = health.get(rankedMirrors(now)[0]) ?? {};
+  const down = best.failedAt && now - best.failedAt < PENALTY_MS;
+  return down || (best.ms ?? 0) > TILE_GRACE_MS * 1.5 ? 0 : TILE_GRACE_MS;
+}
+
+/**
  * Overpass, with the basemap's vector tiles as a stand-in.
  *
  *   - Overpass answers within the grace period → its answer, as before.
@@ -376,10 +387,13 @@ function fetchLiveWithTiles(dataset, bbox, opts) {
       fetchFromTiles(dataset, bbox, quiet).then((g) => {
         if (settled) return;
         if (!g.features.length && !liveError) return;      // let Overpass decide
-        g.meta = { ...g.meta, noStore: true };
+        // Keep the full download coming: it is stored when it lands, and
+        // `later` tells the panel when to swap it in for the tile version.
+        const later = live
+          .then((full) => storeLater(cacheEntryFor(dataset, bbox), full).then(() => Boolean(full?.features?.length)))
+          .catch(() => false);
+        g.meta = { ...g.meta, noStore: true, later };
         win(g);
-        // Keep the full download coming, for next time.
-        live.then((full) => storeLater(cacheEntryFor(dataset, bbox), full)).catch(() => {});
       }).catch((err) => {
         tilesFailed = true;
         if (liveError) fail(liveError);
@@ -387,7 +401,7 @@ function fetchLiveWithTiles(dataset, bbox, opts) {
       });
     };
 
-    const timer = setTimeout(startTiles, TILE_GRACE_MS);
+    const timer = setTimeout(startTiles, tileGraceMs());
     live.then(win, (err) => {
       liveError = err;
       if (err?.name === 'AbortError') return fail(err);

@@ -28,8 +28,13 @@ import { entryKey, normBbox } from './key.js';
  */
 const BASE = (import.meta.env?.VITE_CACHE_URL ?? '/api/cache').replace(/\/$/, '');
 
-/** How long to wait on the database before deciding a live fetch is faster. */
-const TIMEOUT_MS = 4000;
+/**
+ * How long to wait on the database before deciding a live fetch is faster.
+ * A server that is down refuses at once, so this only bites on a slow answer —
+ * and the slowest honest one is cutting a district out of a state's roads the
+ * first time (about 4 s), which still beats any public Overpass by far.
+ */
+const TIMEOUT_MS = 15_000;
 /** Consecutive failures before the layer switches itself off. */
 const TRIP_AFTER = 2;
 /** How long it stays off. */

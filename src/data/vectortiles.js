@@ -10,7 +10,7 @@
  * But the same OpenStreetMap data is already being served to this page as
  * the basemap: OpenFreeMap's vector tiles (OpenMapTiles schema), from a CDN
  * that answers in a fraction of a second, worldwide. Roads, railways, rivers,
- * lakes, forests, parks, places, airports, buildings and points of interest
+ * lakes, forests, parks, places, airports and points of interest
  * are all in them. So when Overpass is slow or refuses an area, a dataset is
  * built from those tiles instead.
  *
@@ -68,7 +68,6 @@ const SPECS = {
   settlements:     { layers: ['place'], min: 10, max: 13 },
   industrial:      { layers: ['landuse'], min: 12, max: 13 },
   cemeteries:      { layers: ['landuse'], min: 13, max: 14 },
-  buildings:       { layers: ['building'], min: 14, max: 14 },
 };
 const POI_DATASETS = ['bus-stops', 'fuel', 'parking', 'health', 'education', 'water-points', 'markets', 'emergency',
   'worship', 'banks', 'government', 'post-telecom', 'hotels', 'food', 'sports', 'culture', 'waste'];

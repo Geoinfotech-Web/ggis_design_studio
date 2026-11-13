@@ -24,6 +24,8 @@ import {
   openDb, lookup, has, assemble, put, stats, prune, purge, gunzipSync, DEFAULT_PATH,
 } from './db.mjs';
 import { openWorldDb, searchWorld, listWorld, getWorldUnit, worldStats, WORLD_PATH } from './world.mjs';
+import { narrowToBbox } from '../src/data/cache/key.js';
+import { gzipSync } from 'node:zlib';
 
 const PORT = Number(process.env.PORT ?? 8788);
 const ORIGIN = process.env.ALLOW_ORIGIN ?? 'http://localhost:5173';
@@ -75,6 +77,30 @@ async function readBody(req) {
 /* routes                                                              */
 /* ------------------------------------------------------------------ */
 
+/** Below this, sending the whole stored download is cheaper than cutting it. */
+const NARROW_MIN_FEATURES = 15_000;
+const bboxArea = ([w, s, e, n]) => Math.max(0, e - w) * Math.max(0, n - s);
+
+/**
+ * Large downloads, parsed, kept for the next request nearby — a user adding
+ * layers for one LGA after another hits the same state file each time. Two
+ * entries is enough for that and keeps memory bounded (a state's local roads
+ * is a few hundred megabytes once parsed).
+ */
+const parsed = new Map();
+const PARSED_MAX = 2;
+function parsedEntry(hit) {
+  if (parsed.has(hit.key)) {
+    const value = parsed.get(hit.key);
+    parsed.delete(hit.key); parsed.set(hit.key, value);   // most recent last
+    return value;
+  }
+  const value = JSON.parse(gunzipSync(hit.body).toString('utf8'));
+  parsed.set(hit.key, value);
+  while (parsed.size > PARSED_MAX) parsed.delete(parsed.keys().next().value);
+  return value;
+}
+
 function getEntry(req, res, url) {
   const bbox = parseBbox(url.searchParams.get('bbox'));
   const provider = url.searchParams.get('provider');
@@ -110,6 +136,19 @@ function getEntry(req, res, url) {
   }
 
   if (!hit) return json(res, 404, { error: 'Not cached.' });
+
+  // A small request answered by a big download — Ikeja's streets out of all
+  // of Lagos State's — is cut down here rather than in the browser. Sending
+  // 109,000 roads for the 9,000 that were asked for cost the browser seven
+  // seconds of download, parsing and storing; cutting here costs the server
+  // a fraction of that, once, and less after (see parsedEntry).
+  if (!hit.exact && hit.features > NARROW_MIN_FEATURES && bboxArea(bbox) < bboxArea(hit.bbox) * 0.5) {
+    const narrowed = narrowToBbox(parsedEntry(hit), bbox);
+    hit.body = gzipSync(JSON.stringify(narrowed), { level: 1 });
+    hit.features = narrowed.features.length;
+    hit.bbox = bbox;
+    hit.exact = true;
+  }
 
   const headers = {
     'Content-Type': 'application/json',

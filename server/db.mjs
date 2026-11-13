@@ -136,6 +136,7 @@ export function lookup(db, q) {
     .run(Date.now(), row.key);
 
   return {
+    key: row.key,
     body: Buffer.from(row.body),
     meta: safeParse(row.meta),
     bbox: [row.w, row.s, row.e, row.n],

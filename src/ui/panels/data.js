@@ -23,7 +23,7 @@ import { parseGeoFile, ACCEPTED } from '../../data/upload.js';
 import { areaParts } from '../../data/study-areas.js';
 import { listWorld } from '../../data/world.js';
 import { uiIcon } from '../ui-icons.js';
-import { addVectorLayer, removeLayer, replaceBySlug } from '../../layers/registry.js';
+import { addVectorLayer, removeLayer, replaceBySlug, updateLayer } from '../../layers/registry.js';
 import { categorisedSymbology, singleSymbology, valuesIn, DEFAULT_LINE_WIDTH_MM } from '../../layers/symbology.js';
 import { iconSvg } from '../../layers/icons.js';
 import { featureCount, formatNumber, bboxOf, boundsFromBbox, clipToArea, dominantGeometry } from '../../core/geo.js';
@@ -183,45 +183,126 @@ function reclip(on) {
 /* ------------------------------------------------------------------ */
 
 /**
+ * How long the second source gets once the first has answered. Long enough
+ * that two healthy sources are merged into one layer, short enough that a
+ * slow one never holds back data that is already here — it is added to the
+ * layer when it arrives instead (see scheduleUpgrade).
+ */
+const COMPANION_GRACE_MS = 5000;
+
+/** A promise whose outcome can be read without awaiting it. */
+function track(promise) {
+  const t = { state: 'pending', value: null, error: null };
+  t.done = Promise.resolve(promise).then(
+    (value) => { t.state = 'ok'; t.value = value; },
+    (error) => { t.state = 'failed'; t.error = error; },
+  );
+  return t;
+}
+
+/** The first task to come back with features, or null once all are done without. */
+function firstWithData(tasks) {
+  return new Promise((resolve) => {
+    let left = tasks.length;
+    for (const t of tasks) {
+      t.done.then(() => {
+        left -= 1;
+        if (t.state === 'ok' && t.value?.features?.length) resolve(t);
+        else if (!left) resolve(null);
+      });
+    }
+  });
+}
+
+/**
  * Fetch one dataset for one study area, both providers, merged and clipped.
+ *
+ * Each provider is a fallback for the other. OpenStreetMap (itself backed by
+ * the shared database and then the map tiles) and Overture start together;
+ * whichever answers first with data is what the user gets, and the other has
+ * COMPANION_GRACE_MS to join it. One that fails is simply left out; one that
+ * is merely slow keeps going and is returned in `pending`, so the layer can be
+ * filled in when it lands.
  *
  * Split out because a map can have several areas and they are fetched
  * separately — see fetchAllParts() for why that matters more than it sounds.
+ *
+ * @returns {Promise<{geojson:object, meta:object, pending:Array<{provider:string, done:Promise<boolean>}>}>}
  */
 async function fetchForPart(dataset, part, { signal, onProgress }) {
   const supplement = dataset.overture;
-  // Both providers at once. Overpass and Overture share nothing but the study
-  // area, so waiting for one before starting the other would just add the two
-  // waits together.
-  //
   // The tile budget is a download budget, so a supplement already stored has
   // no tiles to pull and the size check does not apply to it.
   const room = supplement ? checkSupplement(supplement, part.bbox) : { ok: false };
   const supStored = supplement && !room.ok ? await isSupplementCached(supplement, part.bbox) : null;
+  const useOverture = Boolean(supplement && (room.ok || supStored));
 
-  const [osm, extra] = await Promise.all([
-    // Cached per slug + bbox, so re-filtering never re-downloads. An area
-    // too large for Overpass is read straight from the map tiles.
-    part.tilesOnly
-      ? fetchTilesOnly(dataset, part.bbox, { signal, onProgress })
-      : fetchDataset(dataset, part.bbox, { signal, onProgress }),
-    // Overture is a supplement, never a requirement: if it is unavailable or
-    // the area is too big for it, the dataset is still the dataset.
-    room.ok || supStored
-      ? fetchOvertureSupplement(supplement, part.bbox, { signal, onProgress }).catch(() => null)
-      : Promise.resolve(null),
-  ]);
+  // Cached per slug + bbox, so re-filtering never re-downloads. An area too
+  // large for Overpass is read straight from the map tiles.
+  const osmTask = track(part.tilesOnly
+    ? fetchTilesOnly(dataset, part.bbox, { signal, onProgress })
+    : fetchDataset(dataset, part.bbox, { signal, onProgress }));
+  const otrTask = useOverture
+    ? track(fetchOvertureSupplement(supplement, part.bbox, { signal, onProgress }))
+    : null;
+  const tasks = [osmTask, otrTask].filter(Boolean);
 
-  const geojson = mergeProviders(osm, extra);
+  const winner = await firstWithData(tasks);
+  if (winner && tasks.length > 1) {
+    if (winner === osmTask && otrTask.state === 'pending') onProgress?.('OpenStreetMap is in — waiting a moment for Overture…');
+    if (winner === otrTask && osmTask.state === 'pending') onProgress?.('Overture is in — waiting a moment for OpenStreetMap…');
+    await Promise.race([
+      Promise.all(tasks.map((t) => t.done)),
+      new Promise((r) => setTimeout(r, COMPANION_GRACE_MS)),
+    ]);
+  }
+  if (signal?.aborted) throw Object.assign(new Error('Aborted'), { name: 'AbortError' });
+
+  const osm = osmTask.state === 'ok' ? osmTask.value : null;
+  const extra = otrTask?.state === 'ok' ? otrTask.value : null;
+
+  // Nothing came back with data. If OpenStreetMap answered, its (empty)
+  // answer stands; if nothing answered at all, its error is the one to show.
+  if (!winner && !osm) {
+    const err = osmTask.error ?? otrTask?.error ?? new Error('No data source answered.');
+    throw err;
+  }
+
+  // Still on its way: the layer is drawn now and topped up later.
+  const pending = [];
+  if (osmTask.state === 'pending') pending.push({ provider: 'OpenStreetMap', done: osmTask.done.then(() => osmTask.state === 'ok') });
+  if (otrTask?.state === 'pending') pending.push({ provider: 'Overture', done: otrTask.done.then(() => otrTask.state === 'ok') });
+  // Map tiles stood in for a slow Overpass, which is still downloading the
+  // full-detail version in the background.
+  if (osm?.meta?.later) pending.push({ provider: 'OpenStreetMap (full detail)', done: osm.meta.later });
+
+  let geojson;
+  if (osm) {
+    geojson = mergeProviders(osm, extra);
+  } else {
+    // OpenStreetMap is down or slow and Overture answered. Overture already
+    // contains most of OpenStreetMap, so all of it is kept — nothing is a
+    // duplicate when there is nothing to be a duplicate of.
+    geojson = {
+      type: 'FeatureCollection',
+      features: extra.features,
+      meta: { only: 'Overture', merged: { osm: 0, overtureAdded: extra.features.length, overtureDuplicates: 0, zoom: extra.meta?.zoom, release: extra.meta?.release } },
+    };
+  }
+  const { later, ...meta } = geojson.meta ?? {};
+
   // Overpass can only be asked for a rectangle, so trim the corners of that
   // rectangle back to the boundary the map is actually about. Clipping here
   // rather than at the end is what makes several areas work: each part is cut
   // to its *own* outline, so the ground between two distant areas never
   // arrives as data.
-  return {
-    geojson: state.clipToArea === false ? geojson : clipToArea(geojson, part.geojson),
-    meta: geojson.meta,
-  };
+  const clipped = state.clipToArea === false ? geojson : clipToArea(geojson, part.geojson);
+  // The merge counted the whole rectangle; say what is left inside the area.
+  if (meta.merged) {
+    const fromOverture = (clipped.features ?? []).filter((f) => f.properties?.gds_provider === 'Overture').length;
+    meta.merged = { ...meta.merged, osm: featureCount(clipped) - fromOverture, overtureAdded: fromOverture };
+  }
+  return { geojson: clipped, meta, pending };
 }
 
 /**
@@ -239,15 +320,17 @@ async function fetchAllParts(dataset, parts, { signal, onProgress }) {
   const features = [];
   const seen = new Set();
   const metas = [];
+  const pending = [];
   let duplicates = 0;
 
   for (const [i, part] of parts.entries()) {
     const where = parts.length > 1 ? `${part.name} · ${i + 1} of ${parts.length}` : '';
-    const { geojson, meta } = await fetchForPart(dataset, part, {
+    const { geojson, meta, pending: waiting } = await fetchForPart(dataset, part, {
       signal,
       onProgress: (msg) => onProgress(where ? `${msg}<br />${where}` : msg),
     });
     if (meta) metas.push(meta);
+    pending.push(...waiting);
 
     for (const f of geojson.features ?? []) {
       // Study areas are allowed to overlap — an LGA and the state around it
@@ -282,7 +365,7 @@ async function fetchAllParts(dataset, parts, { signal, onProgress }) {
   return {
     type: 'FeatureCollection',
     features,
-    meta: { ...merged, ...(duplicates ? { areaOverlap: duplicates } : {}) },
+    meta: { ...merged, ...(duplicates ? { areaOverlap: duplicates } : {}), pending },
   };
 }
 
@@ -398,7 +481,23 @@ function refuseTooBig(dataset, part, many) {
   });
 }
 
-async function addDataset(dataset, { quiet = false } = {}) {
+/**
+ * Top a layer up once the source that was too slow to wait for has arrived.
+ *
+ * The first draw used whatever was ready; the rest is now in the caches, so
+ * running the add again is a read from memory. Skipped if the layer has been
+ * removed, the study area changed, or nothing new actually arrived.
+ */
+function scheduleUpgrade(dataset, area, pending) {
+  Promise.all(pending.map((p) => p.done.catch(() => false))).then((oks) => {
+    if (!oks.some(Boolean)) return;
+    if (state.studyArea !== area || !layerForSlug(dataset.slug) || inflight.has(dataset.slug)) return;
+    const names = pending.filter((_, i) => oks[i]).map((p) => p.provider);
+    addDataset(dataset, { upgrade: names });
+  });
+}
+
+async function addDataset(dataset, { quiet = false, upgrade = null } = {}) {
   const area = state.studyArea;
   if (!area) {
     notify.warn('Load a study area first — open data is fetched for that boundary.');
@@ -433,13 +532,20 @@ async function addDataset(dataset, { quiet = false } = {}) {
   const controller = new AbortController();
   inflight.set(dataset.slug, controller);
   render();
-  const status = notify.busy(`Fetching <b>${dataset.name}</b>…`);
+  // Topping up runs in the background: no spinner, just a word when it lands.
+  const status = upgrade
+    ? { update: () => {}, close: () => {} }
+    : notify.busy(`Fetching <b>${dataset.name}</b>…`);
 
   try {
+    // A source still downloading in the background must not write its
+    // progress over the finished message.
+    let shown = false;
     const clipped = await fetchAllParts(dataset, parts, {
       signal: controller.signal,
-      onProgress: (msg) => status.update(`${msg}<br /><b>${dataset.name}</b>`),
+      onProgress: (msg) => { if (!shown) status.update(`${msg}<br /><b>${dataset.name}</b>`); },
     });
+    shown = true;
 
     if (!featureCount(clipped)) {
       status.update(
@@ -482,6 +588,21 @@ async function addDataset(dataset, { quiet = false } = {}) {
 
     const merged = clipped.meta?.merged;
 
+    if (upgrade) {
+      // Same layer, more data: keep whatever the user has restyled since.
+      const layer = layerForSlug(dataset.slug);
+      const before = featureCount(layer.geojson);
+      updateLayer(layer.id, {
+        geojson: filtered,
+        meta: { ...layer.meta, merged: merged?.overtureAdded ? merged : null },
+      });
+      renderElements();
+      if (features.length !== before) {
+        notify.ok(`<b>${dataset.name}</b> updated with ${upgrade.join(' and ')} — now ${formatNumber(features.length, 0)} features.`, { duration: 5500 });
+      }
+      return;
+    }
+
     replaceBySlug(dataset.slug, {
       name: pick && dataset.segments ? `${dataset.name} (${pick.size} of ${dataset.segments.length} types)` : dataset.name,
       source: 'osm',
@@ -508,9 +629,17 @@ async function addDataset(dataset, { quiet = false } = {}) {
       : cached
         ? ` from ${cached.source === 'database' ? 'the shared database' : 'cache'}${cached.ageDays > 1 ? `, stored ${cached.ageDays} days ago` : ''}`
         : (clipped.meta?.seconds ? ` in ${clipped.meta.seconds}s` : '');
-    const plus = merged?.overtureAdded
-      ? ` — ${formatNumber(merged.overtureAdded, 0)} added by Overture on top of OpenStreetMap`
+    const plus = clipped.meta?.only === 'Overture'
+      ? ' from Overture — OpenStreetMap was not answering'
+      : merged?.overtureAdded
+        ? ` — ${formatNumber(merged.overtureAdded, 0)} added by Overture on top of OpenStreetMap`
+        : '';
+    const pending = clipped.meta?.pending ?? [];
+    const stillLoading = [...new Set(pending.map((p) => p.provider.replace(/ \(.*\)$/, '')))];
+    const later = stillLoading.length
+      ? `. ${stillLoading.join(' and ')} ${stillLoading.length > 1 ? 'are' : 'is'} still loading — the layer will fill in when it arrives`
       : '';
+    if (pending.length) scheduleUpgrade(dataset, area, pending);
     // Worth saying when it happened: overlapping study areas are a legitimate
     // thing to have, and this is the app showing its working rather than
     // quietly returning a different number than the sum of the parts.
@@ -518,9 +647,10 @@ async function addDataset(dataset, { quiet = false } = {}) {
       ? ` across ${parts.length} areas${clipped.meta?.areaOverlap ? `, ${formatNumber(clipped.meta.areaOverlap, 0)} overlapping duplicates dropped` : ''}`
       : '';
     if (quiet) status.close();
-    else status.update(`<b>${dataset.name}</b> · ${formatNumber(features.length, 0)} features${across}${via}${plus}.`, { tone: 'ok', duration: 5500 });
+    else status.update(`<b>${dataset.name}</b> · ${formatNumber(features.length, 0)} features${across}${via}${plus}${later}.`, { tone: 'ok', duration: pending.length ? 7000 : 5500 });
   } catch (err) {
-    if (err.name === 'AbortError') status.close();
+    if (upgrade) status.close();          // the layer already on the map stands
+    else if (err.name === 'AbortError') status.close();
     else status.update(`Could not fetch ${dataset.name}. ${err.message}`, { tone: 'error', duration: 8000 });
   } finally {
     inflight.delete(dataset.slug);

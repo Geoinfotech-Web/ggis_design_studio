@@ -6,6 +6,25 @@ follow [Semantic Versioning](https://semver.org).
 ## Unreleased
 
 ### Data that always loads
+- Every dataset with an Overture supplement now treats OpenStreetMap and
+  Overture as fallbacks for each other. Both start together; the first with
+  data is shown, the other gets 5 s to join. A source that fails is left out
+  (e.g. OpenStreetMap down → Overture alone); one that is only slow keeps
+  downloading and the layer fills itself in when it lands, keeping any
+  restyling. Map-tile stand-ins are likewise swapped for the full
+  OpenStreetMap download once it arrives.
+- The Overture count in the "added" message is now counted inside the study
+  area, not the whole download rectangle.
+- Overture buildings and places work again: Overture's release catalogue
+  switched to absolute links, the parser missed them and fell back to a
+  removed release (every Overture request returned 404). Pin now 2026-10-21.0.
+- A district inside a big stored download (Ikeja's streets out of a state's)
+  is cut out on the cache server instead of shipped whole to the browser:
+  6.8 s → 1.5 s. The browser now waits up to 15 s for the database.
+- The map-tile fallback starts at once when the best Overpass mirror is known
+  to be down or slow, instead of after the 4 s grace period.
+- Buildings are no longer taken from the map tiles (too generalised); if
+  OpenStreetMap is down, the Overture footprints are kept on their own.
 - When OpenStreetMap's public Overpass servers are slow (no answer within
   4 s) or fail, a dataset is built from the basemap's own OpenFreeMap vector
   tiles instead (`src/data/vectortiles.js`) — e.g. Nairobi major roads now
