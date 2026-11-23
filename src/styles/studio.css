@@ -988,6 +988,17 @@ input[type='range'] { width: 100%; accent-color: var(--accent); }
   /* Bigger touch targets in panel lists. */
   .row { min-height: 44px; }
   .btn-primary, .btn-soft, .btn-ghost { min-height: 40px; }
+
+  /* The bottom toolbar fits the screen: the buttons share the width rather
+     than scrolling, and keyboard shortcuts — no use without a keyboard —
+     step aside so the last tool is never cut off at the edge. */
+  .rail-btn { min-width: 0; flex: 1 1 0; padding: 6px 2px; }
+  .rail-btn--util { display: none; }
+
+  /* The floating map tools belong to the map: while a sheet covers it they
+     would sit on top of the form, so they wait until it is closed. */
+  .studio.is-panel-open .map-controls,
+  .studio.is-inspector-open .map-controls { display: none; }
 }
 
 /* Fingers need bigger resize handles than a mouse pointer does. */

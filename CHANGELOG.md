@@ -5,6 +5,12 @@ follow [Semantic Versioning](https://semver.org).
 
 ## Unreleased
 
+### Phones
+- The bottom toolbar now fits the screen width (the last button was cut off
+  on a 390 px phone); keyboard shortcuts are hidden on phones.
+- The floating map tools hide while a sheet is open instead of sitting on
+  top of its form.
+
 ### Data that always loads
 - Every dataset with an Overture supplement now treats OpenStreetMap and
   Overture as fallbacks for each other. Both start together; the first with
