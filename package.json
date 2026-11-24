@@ -3,10 +3,10 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Mappix Studio v1 — template-based, print-ready map design with worldwide OpenStreetMap boundaries and open data",
+  "description": "Mappix Studio v1 \u2014 template-based, print-ready map design with worldwide OpenStreetMap boundaries and open data",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
+    "dev": "node init && vite",
+    "build": "node init && vite build",
     "preview": "vite preview",
     "test": "vitest",
     "test:run": "vitest run",
