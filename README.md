@@ -82,6 +82,109 @@ falls back to searching OpenStreetMap online.
 | [CHANGELOG.md](CHANGELOG.md) | Release notes |
 | [tests/README.md](tests/README.md) | What the test suite covers |
 
+## Manual AWS Docker deployment
+
+This is the low-traffic deployment workflow for the private repository. Build
+the images on the development Mac, transfer them to the dedicated Ubuntu EC2
+instance, and restart the Compose stack. The server does not need the source
+repository, Node.js, npm, or GitHub credentials.
+
+Set these values in the commands below:
+
+```text
+YOUR_ELASTIC_IP       the instance's Elastic IP
+YOUR_PRIVATE_KEY.pem  the EC2 SSH key downloaded when the instance was created
+YOUR_DOMAIN           the HTTPS domain, for example mappix.studio
+```
+
+### 1. Build and archive on the Mac
+
+Run from the repository root. Rebuild after application or Dockerfile changes:
+
+```bash
+docker compose build
+
+docker save \
+  -o /tmp/gis-studio-images.tar \
+  gis-studio-web:latest \
+  gis-geodata:latest
+
+gzip -1 /tmp/gis-studio-images.tar
+```
+
+### 2. Copy the release to EC2
+
+The Compose file only needs to be copied when it changes. Do not copy the
+local `.env`; the production `.env` belongs on the server.
+
+```bash
+scp \
+  -i ~/Downloads/YOUR_PRIVATE_KEY.pem \
+  /tmp/gis-studio-images.tar.gz \
+  ubuntu@YOUR_ELASTIC_IP:~/gis-studio/
+
+# Only when docker-compose.yml changed:
+scp \
+  -i ~/Downloads/YOUR_PRIVATE_KEY.pem \
+  docker-compose.yml \
+  ubuntu@YOUR_ELASTIC_IP:~/gis-studio/
+```
+
+### 3. Back up and deploy on EC2
+
+```bash
+ssh -i ~/Downloads/YOUR_PRIVATE_KEY.pem ubuntu@YOUR_ELASTIC_IP
+
+cd ~/gis-studio
+mkdir -p server/data
+
+# Back up users, sessions, and saved maps before replacing images.
+docker compose run --rm --no-build backup-accounts
+
+# Load the new images.
+gunzip -c gis-studio-images.tar.gz | sudo docker load
+
+# Recreate containers without building on the small server.
+docker compose up -d --no-build
+```
+
+### 4. Verify the release
+
+```bash
+docker compose ps
+curl https://YOUR_DOMAIN/api/account/health
+curl https://YOUR_DOMAIN/api/cache/health
+```
+
+The account health response should contain `"ok":true`; the cache health
+response should also contain `"ok":true`.
+
+After verification, the uploaded archive can be removed from the server and
+the temporary archive from the Mac:
+
+```bash
+# On EC2:
+rm ~/gis-studio/gis-studio-images.tar.gz
+
+exit
+
+# Back on the Mac:
+rm /tmp/gis-studio-images.tar.gz
+```
+
+Keep the production `.env` on the server. It should retain HTTPS settings such
+as `COOKIE_SECURE=1` and `ALLOW_ORIGIN=https://YOUR_DOMAIN`.
+
+Never run this during a normal deployment:
+
+```bash
+docker compose down -v
+```
+
+The `-v` option can delete the Docker volumes containing `accounts.db`,
+`geodata.db`, and `world.db`. For the full architecture, HTTPS setup, data
+imports, and backup guidance, see [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+
 ## Scripts
 
 | Command | Does |
